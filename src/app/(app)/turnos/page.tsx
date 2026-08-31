@@ -5,12 +5,14 @@ import { eliminarTurno } from "./actions";
 
 const ESTADO_LABEL: Record<TurnoEstado, string> = {
   programado: "Programado",
+  confirmado: "Confirmado",
   realizado: "Realizado",
   cancelado: "Cancelado",
 };
 
 const ESTADO_CLASS: Record<TurnoEstado, string> = {
   programado: "bg-blue-100 text-blue-700",
+  confirmado: "bg-purple-100 text-purple-700",
   realizado: "bg-green-100 text-green-700",
   cancelado: "bg-gray-100 text-gray-500",
 };
@@ -126,6 +128,9 @@ export default async function TurnosPage({
                         <span className={`rounded-full px-2 py-0.5 text-xs ${ESTADO_CLASS[turno.estado]}`}>
                           {ESTADO_LABEL[turno.estado]}
                         </span>
+                        {turno.estado === "cancelado" && turno.motivo_cancelacion && (
+                          <p className="mt-1 max-w-xs text-xs text-gray-400">{turno.motivo_cancelacion}</p>
+                        )}
                       </td>
                       <td className="px-4 py-2 text-gray-600">${turno.monto}</td>
                       <td className="px-4 py-2 text-gray-600">{turno.pagado ? "Sí" : "No"}</td>

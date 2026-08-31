@@ -1,8 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 import type { TurnoFormState } from "./actions";
-import type { Turno } from "@/types/turno";
+import type { Turno, TurnoEstado } from "@/types/turno";
 
 type PacienteOption = { id: string; nombre_apellido: string };
 
@@ -32,6 +32,7 @@ export function TurnoForm({
   turno?: Turno;
 }) {
   const [state, formAction, pending] = useActionState(action, { error: null });
+  const [estado, setEstado] = useState<TurnoEstado>(turno?.estado ?? "programado");
 
   return (
     <form action={formAction} className="max-w-lg space-y-4">
@@ -94,10 +95,12 @@ export function TurnoForm({
           <select
             id="estado"
             name="estado"
-            defaultValue={turno?.estado ?? "programado"}
+            value={estado}
+            onChange={(e) => setEstado(e.target.value as TurnoEstado)}
             className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
           >
             <option value="programado">Programado</option>
+            <option value="confirmado">Confirmado</option>
             <option value="realizado">Realizado</option>
             <option value="cancelado">Cancelado</option>
           </select>
@@ -117,6 +120,21 @@ export function TurnoForm({
           />
         </div>
       </div>
+
+      {estado === "cancelado" && (
+        <div className="space-y-1">
+          <label htmlFor="motivo_cancelacion" className="text-sm font-medium text-gray-700">
+            Motivo de cancelación
+          </label>
+          <textarea
+            id="motivo_cancelacion"
+            name="motivo_cancelacion"
+            rows={2}
+            defaultValue={turno?.motivo_cancelacion ?? ""}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+          />
+        </div>
+      )}
 
       <label className="flex items-center gap-2 text-sm text-gray-700">
         <input type="checkbox" name="pagado" defaultChecked={turno?.pagado ?? false} />

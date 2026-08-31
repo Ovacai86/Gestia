@@ -45,9 +45,10 @@ No agregar estas features salvo que se pida explícitamente.
 - paciente_id (uuid, FK a paciente)
 - fecha_hora (timestamp)
 - duracion_minutos (int)
-- estado (enum: programado / realizado / cancelado)
+- estado (enum: programado / confirmado / realizado / cancelado)
 - monto (numeric)
 - pagado (boolean, default false)
+- motivo_cancelacion (text, nullable — solo aplica si estado = cancelado)
 - user_id (uuid, FK a auth.users)
 
 ### gasto

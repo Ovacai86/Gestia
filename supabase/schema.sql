@@ -1,7 +1,7 @@
 -- Gestia — schema inicial (paciente, turno, gasto) con Row Level Security.
 -- Ejecutar en Supabase: Project > SQL Editor > New query > pegar y correr.
 
-create type turno_estado as enum ('programado', 'realizado', 'cancelado');
+create type turno_estado as enum ('programado', 'confirmado', 'realizado', 'cancelado');
 
 create table if not exists paciente (
   id uuid primary key default gen_random_uuid(),
@@ -24,6 +24,7 @@ create table if not exists turno (
   estado turno_estado not null default 'programado',
   monto numeric(10, 2) not null default 0,
   pagado boolean not null default false,
+  motivo_cancelacion text,
   user_id uuid not null references auth.users (id) default auth.uid()
 );
 
@@ -59,3 +60,9 @@ create policy "gasto_select_own" on gasto for select using (user_id = auth.uid()
 create policy "gasto_insert_own" on gasto for insert with check (user_id = auth.uid());
 create policy "gasto_update_own" on gasto for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "gasto_delete_own" on gasto for delete using (user_id = auth.uid());
+
+-- Migración: estado "confirmado" y motivo de cancelación en turno.
+-- Correr esto en un proyecto que ya tenía el schema anterior aplicado
+-- (en un proyecto nuevo, el create type/create table de arriba ya lo incluyen).
+alter type turno_estado add value if not exists 'confirmado';
+alter table turno add column if not exists motivo_cancelacion text;

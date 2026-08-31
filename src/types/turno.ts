@@ -1,4 +1,4 @@
-export type TurnoEstado = "programado" | "realizado" | "cancelado";
+export type TurnoEstado = "programado" | "confirmado" | "realizado" | "cancelado";
 
 export type Turno = {
   id: string;
@@ -8,6 +8,7 @@ export type Turno = {
   estado: TurnoEstado;
   monto: number;
   pagado: boolean;
+  motivo_cancelacion: string | null;
   user_id: string;
 };
 

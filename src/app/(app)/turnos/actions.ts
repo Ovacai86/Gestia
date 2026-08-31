@@ -13,14 +13,17 @@ function readTurnoForm(formData: FormData) {
   const fechaHoraLocal = String(formData.get("fecha_hora") ?? "");
   const monto = Number(formData.get("monto") ?? 0);
   const duracion = Number(formData.get("duracion_minutos") ?? 50);
+  const estado = String(formData.get("estado") ?? "programado") as TurnoEstado;
+  const motivoCancelacion = String(formData.get("motivo_cancelacion") ?? "").trim();
 
   return {
     paciente_id: String(formData.get("paciente_id") ?? ""),
     fecha_hora: fechaHoraLocal ? new Date(`${fechaHoraLocal}:00-03:00`).toISOString() : null,
     duracion_minutos: Number.isFinite(duracion) && duracion > 0 ? duracion : 50,
-    estado: String(formData.get("estado") ?? "programado") as TurnoEstado,
+    estado,
     monto: Number.isFinite(monto) ? monto : 0,
     pagado: formData.get("pagado") === "on",
+    motivo_cancelacion: estado === "cancelado" && motivoCancelacion ? motivoCancelacion : null,
   };
 }
 
