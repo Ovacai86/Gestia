@@ -24,6 +24,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <Link href="/pacientes" className="text-sm text-gray-600 hover:text-gray-900">
               Pacientes
             </Link>
+            <Link href="/turnos" className="text-sm text-gray-600 hover:text-gray-900">
+              Turnos
+            </Link>
           </nav>
           <form action={logout}>
             <button type="submit" className="text-sm text-gray-600 hover:text-gray-900">
