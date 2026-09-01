@@ -26,7 +26,7 @@ export default async function PacientesPage() {
       {!pacientes || pacientes.length === 0 ? (
         <p className="text-gray-500">Todavía no cargaste ningún paciente.</p>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-left text-gray-500">
               <tr>

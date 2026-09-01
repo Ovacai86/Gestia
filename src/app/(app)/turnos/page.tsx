@@ -102,7 +102,7 @@ export default async function TurnosPage({
             ))}
           </div>
 
-          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white">
+          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
             {!grupoActivo ? (
               <p className="p-4 text-gray-500">Seleccioná un paciente.</p>
             ) : (
