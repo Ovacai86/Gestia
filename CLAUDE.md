@@ -25,6 +25,8 @@ No agregar estas features salvo que se pida explícitamente.
 - Vercel — hosting/deploy
 - TypeScript
 - Tailwind CSS para estilos
+- shadcn/ui (estilo `base-nova`, sobre @base-ui/react) para componentes
+- react-hook-form + Zod (`@hookform/resolvers`) para formularios y validación
 
 ## Modelo de datos
 
@@ -64,6 +66,13 @@ No agregar estas features salvo que se pida explícitamente.
 - Usar Server Components de Next.js por default; Client Components solo cuando haga falta interactividad.
 - Toda tabla de Supabase debe tener Row Level Security (RLS) activado, filtrando por user_id = auth.uid().
 - No exponer claves de Supabase tipo "service_role" en el cliente — solo la anon key pública.
+- Los schemas de validación viven centralizados en `src/lib/validations/` (uno por entidad).
+- Los formularios usan react-hook-form + zodResolver y muestran el error de cada campo
+  debajo del input (`FormMessage` de `src/components/ui/form.tsx`), no un mensaje genérico al pie.
+- Los campos numéricos se validan como string con `.refine()` en vez de `z.coerce.number()`:
+  coerce rompe la inferencia de tipos entre el resolver y `useForm`.
+- Las server actions siguen validando del lado del servidor: el schema de Zod es la primera
+  barrera (UX), no la única.
 
 ## Comandos
 - `npm run dev` — levantar entorno de desarrollo

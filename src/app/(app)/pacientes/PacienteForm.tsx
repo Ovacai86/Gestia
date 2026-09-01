@@ -1,8 +1,17 @@
 "use client";
 
-import { useActionState } from "react";
+import { startTransition, useActionState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import type { PacienteFormState } from "./actions";
 import type { Paciente } from "@/types/paciente";
+import { pacienteSchema, type PacienteFormValues } from "@/lib/validations/paciente";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Form, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 
 export function PacienteForm({
   action,
@@ -13,98 +22,131 @@ export function PacienteForm({
 }) {
   const [state, formAction, pending] = useActionState(action, { error: null });
 
+  const form = useForm<PacienteFormValues>({
+    resolver: zodResolver(pacienteSchema),
+    defaultValues: {
+      nombre_apellido: paciente?.nombre_apellido ?? "",
+      dni: paciente?.dni ?? "",
+      telefono: paciente?.telefono ?? "",
+      email: paciente?.email ?? "",
+      obra_social: paciente?.obra_social ?? "",
+      notas: paciente?.notas ?? "",
+      activo: paciente?.activo ?? true,
+    },
+  });
+
+  function onValid(values: PacienteFormValues) {
+    const formData = new FormData();
+    formData.set("nombre_apellido", values.nombre_apellido);
+    formData.set("dni", values.dni);
+    formData.set("telefono", values.telefono ?? "");
+    formData.set("email", values.email ?? "");
+    formData.set("obra_social", values.obra_social ?? "");
+    formData.set("notas", values.notas ?? "");
+    if (values.activo) {
+      formData.set("activo", "on");
+    }
+    startTransition(() => {
+      formAction(formData);
+    });
+  }
+
   return (
-    <form action={formAction} className="max-w-lg space-y-4">
-      <div className="space-y-1">
-        <label htmlFor="nombre_apellido" className="text-sm font-medium text-gray-700">
-          Nombre y apellido *
-        </label>
-        <input
-          id="nombre_apellido"
+    <Form {...form}>
+      {/* noValidate: la validación la maneja Zod, no el navegador. Sin esto, el
+          browser bloquea el submit (ej. type="email" inválido) y nunca se muestran
+          los errores inline. */}
+      <form onSubmit={form.handleSubmit(onValid)} noValidate className="max-w-lg space-y-4">
+        <FormField
+          control={form.control}
           name="nombre_apellido"
-          required
-          defaultValue={paciente?.nombre_apellido}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Nombre y apellido *</FormLabel>
+              <Input {...field} aria-invalid={!!form.formState.errors.nombre_apellido} />
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1">
-          <label htmlFor="dni" className="text-sm font-medium text-gray-700">
-            DNI
-          </label>
-          <input
-            id="dni"
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            control={form.control}
             name="dni"
-            defaultValue={paciente?.dni ?? ""}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>DNI *</FormLabel>
+                <Input {...field} inputMode="numeric" aria-invalid={!!form.formState.errors.dni} />
+                <FormMessage />
+              </FormItem>
+            )}
           />
-        </div>
-        <div className="space-y-1">
-          <label htmlFor="telefono" className="text-sm font-medium text-gray-700">
-            Teléfono
-          </label>
-          <input
-            id="telefono"
+          <FormField
+            control={form.control}
             name="telefono"
-            defaultValue={paciente?.telefono ?? ""}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Teléfono</FormLabel>
+                <Input {...field} aria-invalid={!!form.formState.errors.telefono} />
+                <FormMessage />
+              </FormItem>
+            )}
           />
         </div>
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="email" className="text-sm font-medium text-gray-700">
-          Email
-        </label>
-        <input
-          id="email"
+        <FormField
+          control={form.control}
           name="email"
-          type="email"
-          defaultValue={paciente?.email ?? ""}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Email</FormLabel>
+              <Input {...field} type="email" aria-invalid={!!form.formState.errors.email} />
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="obra_social" className="text-sm font-medium text-gray-700">
-          Obra social
-        </label>
-        <input
-          id="obra_social"
+        <FormField
+          control={form.control}
           name="obra_social"
-          defaultValue={paciente?.obra_social ?? ""}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Obra social</FormLabel>
+              <Input {...field} />
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <div className="space-y-1">
-        <label htmlFor="notas" className="text-sm font-medium text-gray-700">
-          Notas
-        </label>
-        <textarea
-          id="notas"
+        <FormField
+          control={form.control}
           name="notas"
-          rows={3}
-          defaultValue={paciente?.notas ?? ""}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Notas</FormLabel>
+              <Textarea {...field} rows={3} />
+              <FormMessage />
+            </FormItem>
+          )}
         />
-      </div>
 
-      <label className="flex items-center gap-2 text-sm text-gray-700">
-        <input type="checkbox" name="activo" defaultChecked={paciente?.activo ?? true} />
-        Activo
-      </label>
+        <FormField
+          control={form.control}
+          name="activo"
+          render={({ field }) => (
+            <Label className="flex w-fit items-center gap-2">
+              <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+              Activo
+            </Label>
+          )}
+        />
 
-      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+        {state.error && <p className="text-sm text-destructive">{state.error}</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
-      >
-        {pending ? "Guardando…" : "Guardar"}
-      </button>
-    </form>
+        <Button type="submit" disabled={pending}>
+          {pending ? "Guardando…" : "Guardar"}
+        </Button>
+      </form>
+    </Form>
   );
 }

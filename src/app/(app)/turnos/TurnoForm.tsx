@@ -1,10 +1,37 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { startTransition, useActionState, useRef, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import type { TurnoFormState } from "./actions";
-import type { Turno, TurnoEstado } from "@/types/turno";
+import type { Turno } from "@/types/turno";
+import { turnoSchema, TURNO_ESTADOS, type TurnoFormValues } from "@/lib/validations/turno";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Form, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 
 type PacienteOption = { id: string; nombre_apellido: string };
+
+const ESTADO_LABELS: Record<(typeof TURNO_ESTADOS)[number], string> = {
+  programado: "Programado",
+  confirmado: "Confirmado",
+  realizado: "Realizado",
+  cancelado: "Cancelado",
+};
 
 // Mismo motivo que en actions.ts: forzamos AR (-03:00) en vez de usar la
 // timezone local del proceso que renderiza (server en SSR vs. browser).
@@ -32,124 +59,221 @@ export function TurnoForm({
   turno?: Turno;
 }) {
   const [state, formAction, pending] = useActionState(action, { error: null });
-  const [estado, setEstado] = useState<TurnoEstado>(turno?.estado ?? "programado");
+  const [pastDateOpen, setPastDateOpen] = useState(false);
+  const pendingValuesRef = useRef<TurnoFormValues | null>(null);
+
+  const form = useForm<TurnoFormValues>({
+    resolver: zodResolver(turnoSchema),
+    defaultValues: {
+      paciente_id: turno?.paciente_id ?? "",
+      fecha_hora: turno ? toDatetimeLocalValue(turno.fecha_hora) : "",
+      duracion_minutos: turno ? String(turno.duracion_minutos) : "50",
+      estado: turno?.estado ?? "programado",
+      monto: turno ? String(turno.monto) : "",
+      pagado: turno?.pagado ?? false,
+      motivo_cancelacion: turno?.motivo_cancelacion ?? "",
+    },
+  });
+
+  const estado = form.watch("estado");
+
+  function submitValues(values: TurnoFormValues) {
+    const formData = new FormData();
+    formData.set("paciente_id", values.paciente_id);
+    formData.set("fecha_hora", values.fecha_hora);
+    formData.set("duracion_minutos", values.duracion_minutos);
+    formData.set("estado", values.estado);
+    formData.set("monto", values.monto);
+    if (values.pagado) {
+      formData.set("pagado", "on");
+    }
+    formData.set("motivo_cancelacion", values.motivo_cancelacion ?? "");
+
+    startTransition(() => {
+      formAction(formData);
+    });
+  }
+
+  function onValid(values: TurnoFormValues) {
+    const fechaHoraDate = new Date(`${values.fecha_hora}:00-03:00`);
+    if (fechaHoraDate.getTime() < Date.now()) {
+      pendingValuesRef.current = values;
+      setPastDateOpen(true);
+      return;
+    }
+    submitValues(values);
+  }
+
+  function confirmPastDate() {
+    setPastDateOpen(false);
+    if (pendingValuesRef.current) {
+      submitValues(pendingValuesRef.current);
+      pendingValuesRef.current = null;
+    }
+  }
 
   return (
-    <form action={formAction} className="max-w-lg space-y-4">
-      <div className="space-y-1">
-        <label htmlFor="paciente_id" className="text-sm font-medium text-gray-700">
-          Paciente *
-        </label>
-        <select
-          id="paciente_id"
-          name="paciente_id"
-          required
-          defaultValue={turno?.paciente_id ?? ""}
-          className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-        >
-          <option value="" disabled>
-            Seleccioná un paciente
-          </option>
-          {pacientes.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.nombre_apellido}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1">
-          <label htmlFor="fecha_hora" className="text-sm font-medium text-gray-700">
-            Fecha y hora *
-          </label>
-          <input
-            id="fecha_hora"
-            name="fecha_hora"
-            type="datetime-local"
-            required
-            defaultValue={turno ? toDatetimeLocalValue(turno.fecha_hora) : ""}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+    <>
+      <Form {...form}>
+        {/* noValidate: la validación la maneja Zod, no el navegador. */}
+        <form onSubmit={form.handleSubmit(onValid)} noValidate className="max-w-lg space-y-4">
+          <FormField
+            control={form.control}
+            name="paciente_id"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Paciente *</FormLabel>
+                <Select
+                  items={pacientes.map((p) => ({ value: p.id, label: p.nombre_apellido }))}
+                  value={field.value || null}
+                  onValueChange={field.onChange}
+                >
+                  <SelectTrigger
+                    className="w-full"
+                    aria-invalid={!!form.formState.errors.paciente_id}
+                  >
+                    <SelectValue placeholder="Seleccioná un paciente" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {pacientes.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.nombre_apellido}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage />
+              </FormItem>
+            )}
           />
-        </div>
-        <div className="space-y-1">
-          <label htmlFor="duracion_minutos" className="text-sm font-medium text-gray-700">
-            Duración (min)
-          </label>
-          <input
-            id="duracion_minutos"
-            name="duracion_minutos"
-            type="number"
-            min={0}
-            defaultValue={turno?.duracion_minutos ?? 50}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+
+          <div className="grid grid-cols-2 gap-4">
+            <FormField
+              control={form.control}
+              name="fecha_hora"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Fecha y hora *</FormLabel>
+                  <Input
+                    {...field}
+                    type="datetime-local"
+                    aria-invalid={!!form.formState.errors.fecha_hora}
+                  />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="duracion_minutos"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Duración (min)</FormLabel>
+                  <Input
+                    {...field}
+                    type="number"
+                    min={0}
+                    aria-invalid={!!form.formState.errors.duracion_minutos}
+                  />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <FormField
+              control={form.control}
+              name="estado"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Estado</FormLabel>
+                  <Select
+                    items={TURNO_ESTADOS.map((value) => ({ value, label: ESTADO_LABELS[value] }))}
+                    value={field.value}
+                    onValueChange={field.onChange}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {TURNO_ESTADOS.map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {ESTADO_LABELS[value]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="monto"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Monto *</FormLabel>
+                  <Input
+                    {...field}
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    aria-invalid={!!form.formState.errors.monto}
+                  />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          {estado === "cancelado" && (
+            <FormField
+              control={form.control}
+              name="motivo_cancelacion"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Motivo de cancelación</FormLabel>
+                  <Textarea {...field} rows={2} />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          )}
+
+          <FormField
+            control={form.control}
+            name="pagado"
+            render={({ field }) => (
+              <Label className="flex w-fit items-center gap-2">
+                <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                Pagado
+              </Label>
+            )}
           />
-        </div>
-      </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1">
-          <label htmlFor="estado" className="text-sm font-medium text-gray-700">
-            Estado
-          </label>
-          <select
-            id="estado"
-            name="estado"
-            value={estado}
-            onChange={(e) => setEstado(e.target.value as TurnoEstado)}
-            className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-          >
-            <option value="programado">Programado</option>
-            <option value="confirmado">Confirmado</option>
-            <option value="realizado">Realizado</option>
-            <option value="cancelado">Cancelado</option>
-          </select>
-        </div>
-        <div className="space-y-1">
-          <label htmlFor="monto" className="text-sm font-medium text-gray-700">
-            Monto
-          </label>
-          <input
-            id="monto"
-            name="monto"
-            type="number"
-            min={0}
-            step="0.01"
-            defaultValue={turno?.monto ?? ""}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-          />
-        </div>
-      </div>
+          {state.error && <p className="text-sm text-destructive">{state.error}</p>}
 
-      {estado === "cancelado" && (
-        <div className="space-y-1">
-          <label htmlFor="motivo_cancelacion" className="text-sm font-medium text-gray-700">
-            Motivo de cancelación
-          </label>
-          <textarea
-            id="motivo_cancelacion"
-            name="motivo_cancelacion"
-            rows={2}
-            defaultValue={turno?.motivo_cancelacion ?? ""}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-          />
-        </div>
-      )}
+          <Button type="submit" disabled={pending}>
+            {pending ? "Guardando…" : "Guardar"}
+          </Button>
+        </form>
+      </Form>
 
-      <label className="flex items-center gap-2 text-sm text-gray-700">
-        <input type="checkbox" name="pagado" defaultChecked={turno?.pagado ?? false} />
-        Pagado
-      </label>
-
-      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
-
-      <button
-        type="submit"
-        disabled={pending}
-        className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
-      >
-        {pending ? "Guardando…" : "Guardar"}
-      </button>
-    </form>
+      <AlertDialog open={pastDateOpen} onOpenChange={setPastDateOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Fecha en el pasado</AlertDialogTitle>
+            <AlertDialogDescription>
+              Estás cargando un turno con fecha pasada, ¿confirmás?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmPastDate}>Confirmar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
