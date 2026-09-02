@@ -80,4 +80,7 @@ export async function eliminarTurno(id: string) {
   const supabase = await createClient();
   await supabase.from("turno").delete().eq("id", id);
   revalidatePath("/turnos");
+  // Se llama desde /turnos/[id]: sin redirect, el re-render busca un turno que
+  // ya no existe y cae en notFound().
+  redirect("/turnos");
 }

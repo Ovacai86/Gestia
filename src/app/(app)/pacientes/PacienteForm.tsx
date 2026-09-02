@@ -56,7 +56,7 @@ export function PacienteForm({
       {/* noValidate: la validación la maneja Zod, no el navegador. Sin esto, el
           browser bloquea el submit (ej. type="email" inválido) y nunca se muestran
           los errores inline. */}
-      <form onSubmit={form.handleSubmit(onValid)} noValidate className="max-w-lg space-y-4">
+      <form onSubmit={form.handleSubmit(onValid)} noValidate className="mx-auto max-w-lg space-y-4">
         <FormField
           control={form.control}
           name="nombre_apellido"

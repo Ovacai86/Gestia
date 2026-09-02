@@ -53,10 +53,16 @@ export function TurnoForm({
   action,
   pacientes,
   turno,
+  fechaHoraInicial,
+  duracionInicial,
 }: {
   action: (state: TurnoFormState, formData: FormData) => Promise<TurnoFormState>;
   pacientes: PacienteOption[];
   turno?: Turno;
+  // Precarga al llegar desde un bloque libre del calendario. Solo aplica al
+  // alta: editando manda siempre lo que ya tiene el turno.
+  fechaHoraInicial?: string;
+  duracionInicial?: string;
 }) {
   const [state, formAction, pending] = useActionState(action, { error: null });
   const [pastDateOpen, setPastDateOpen] = useState(false);
@@ -66,8 +72,8 @@ export function TurnoForm({
     resolver: zodResolver(turnoSchema),
     defaultValues: {
       paciente_id: turno?.paciente_id ?? "",
-      fecha_hora: turno ? toDatetimeLocalValue(turno.fecha_hora) : "",
-      duracion_minutos: turno ? String(turno.duracion_minutos) : "50",
+      fecha_hora: turno ? toDatetimeLocalValue(turno.fecha_hora) : (fechaHoraInicial ?? ""),
+      duracion_minutos: turno ? String(turno.duracion_minutos) : (duracionInicial ?? "50"),
       estado: turno?.estado ?? "programado",
       monto: turno ? String(turno.monto) : "",
       pagado: turno?.pagado ?? false,
@@ -116,7 +122,7 @@ export function TurnoForm({
     <>
       <Form {...form}>
         {/* noValidate: la validación la maneja Zod, no el navegador. */}
-        <form onSubmit={form.handleSubmit(onValid)} noValidate className="max-w-lg space-y-4">
+        <form onSubmit={form.handleSubmit(onValid)} noValidate className="mx-auto max-w-lg space-y-4">
           <FormField
             control={form.control}
             name="paciente_id"
