@@ -4,8 +4,41 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { TurnoEstado } from "@/types/turno";
+import type { DisponibilidadConFranjas } from "@/types/disponibilidad";
+import {
+  caeEnDisponibilidad,
+  esFechaValida,
+  fechaHoraEnAR,
+  inicioDelDiaISO,
+  sumarDias,
+} from "@/lib/agenda";
 
-export type TurnoFormState = { error: string | null };
+// Un turno de la serie que pisa a uno que ya estaba. Se crea igual: el
+// profesional decide después qué hacer con cada caso.
+export type Colision = {
+  fecha: string;
+  hora: string;
+  con: string;
+};
+
+export type ResumenRecurrencia = {
+  creados: number;
+  desde: string;
+  hasta: string;
+  colisiones: Colision[];
+  // Fechas de la serie que caen fuera de la disponibilidad configurada. Se
+  // crean igual (es la agenda propia del profesional), pero se avisan.
+  fueraDeHorario: string[];
+};
+
+export type TurnoFormState = {
+  error: string | null;
+  resumen?: ResumenRecurrencia | null;
+};
+
+// Tope de seguridad: una fecha de fin muy lejana no debería generar miles de
+// filas de un click.
+const MAX_TURNOS_RECURRENTES = 200;
 
 // El input datetime-local no lleva timezone; se fija -03:00 (AR) para que no
 // dependa de en qué timezone corra el servidor (Vercel usa UTC).
@@ -27,6 +60,22 @@ function readTurnoForm(formData: FormData) {
   };
 }
 
+// Las fechas de la serie: la inicial y después una por semana, hasta la fecha
+// de fin inclusive.
+function fechasSemanales(desde: string, hasta: string): string[] {
+  const fechas: string[] = [];
+  for (let f = desde; f <= hasta && fechas.length < MAX_TURNOS_RECURRENTES; f = sumarDias(f, 7)) {
+    fechas.push(f);
+  }
+  return fechas;
+}
+
+type TurnoExistente = {
+  fecha_hora: string;
+  duracion_minutos: number;
+  paciente: { nombre_apellido: string } | null;
+};
+
 export async function crearTurno(
   _prevState: TurnoFormState,
   formData: FormData,
@@ -41,13 +90,115 @@ export async function crearTurno(
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.from("turno").insert(data);
+
+  const recurrente = formData.get("recurrente") === "on";
+  if (!recurrente) {
+    const { error } = await supabase.from("turno").insert(data);
+
+    if (error) {
+      return { error: error.message };
+    }
+
+    revalidatePath("/turnos");
+    redirect("/turnos");
+  }
+
+  // "YYYY-MM-DDTHH:MM" tal como lo mandó el form, para repetir el mismo
+  // horario cada semana sin depender de la timezone del server.
+  const fechaHoraLocal = String(formData.get("fecha_hora") ?? "");
+  const fechaInicial = fechaHoraLocal.slice(0, 10);
+  const horaInicial = fechaHoraLocal.slice(11, 16);
+  const fechaFin = String(formData.get("fecha_fin_recurrencia") ?? "").trim();
+
+  if (!esFechaValida(fechaFin)) {
+    return { error: "Poné hasta qué fecha se repite el turno." };
+  }
+  if (fechaFin < fechaInicial) {
+    return { error: "La fecha de fin tiene que ser igual o posterior a la del turno." };
+  }
+
+  const fechas = fechasSemanales(fechaInicial, fechaFin);
+  if (fechas.length >= MAX_TURNOS_RECURRENTES) {
+    return {
+      error: `La recurrencia genera más de ${MAX_TURNOS_RECURRENTES} turnos. Acortá la fecha de fin.`,
+    };
+  }
+
+  const filas = fechas.map((fecha) => ({
+    ...data,
+    fecha_hora: new Date(`${fecha}T${horaInicial}:00-03:00`).toISOString(),
+  }));
+
+  const ultima = fechas[fechas.length - 1];
+
+  // Se buscan de una sola vez los turnos que ya existen en todo el rango, y
+  // las colisiones se resuelven en memoria. Los cancelados no ocupan horario,
+  // así que no cuentan como choque.
+  const [{ data: existentes }, { data: disponibilidades }] = await Promise.all([
+    supabase
+      .from("turno")
+      .select("fecha_hora, duracion_minutos, paciente(nombre_apellido)")
+      .neq("estado", "cancelado")
+      .gte("fecha_hora", inicioDelDiaISO(fechaInicial))
+      .lt("fecha_hora", inicioDelDiaISO(sumarDias(ultima, 1)))
+      .returns<TurnoExistente[]>(),
+    supabase
+      .from("disponibilidad")
+      .select("*, franja_horaria(*)")
+      .returns<DisponibilidadConFranjas[]>(),
+  ]);
+
+  const colisiones: Colision[] = [];
+  const fueraDeHorario: string[] = [];
+
+  filas.forEach((fila, i) => {
+    const fecha = fechas[i];
+
+    // Dos turnos chocan si sus intervalos se solapan, no solo si arrancan a la
+    // misma hora.
+    const inicio = new Date(fila.fecha_hora).getTime();
+    const fin = inicio + fila.duracion_minutos * 60_000;
+    const choque = (existentes ?? []).find((t) => {
+      const otroInicio = new Date(t.fecha_hora).getTime();
+      const otroFin = otroInicio + t.duracion_minutos * 60_000;
+      return otroInicio < fin && inicio < otroFin;
+    });
+
+    if (choque) {
+      colisiones.push({
+        fecha,
+        hora: fechaHoraEnAR(choque.fecha_hora).hora,
+        con: choque.paciente?.nombre_apellido ?? "otro turno",
+      });
+    }
+
+    if (!caeEnDisponibilidad(fecha, horaInicial, disponibilidades ?? [])) {
+      fueraDeHorario.push(fecha);
+    }
+  });
+
+  const { error } = await supabase.from("turno").insert(filas);
 
   if (error) {
     return { error: error.message };
   }
 
   revalidatePath("/turnos");
+
+  // Con algo para avisar no se redirige: el resumen se muestra en el form.
+  if (colisiones.length > 0 || fueraDeHorario.length > 0) {
+    return {
+      error: null,
+      resumen: {
+        creados: filas.length,
+        desde: fechaInicial,
+        hasta: ultima,
+        colisiones,
+        fueraDeHorario,
+      },
+    };
+  }
+
   redirect("/turnos");
 }
 

@@ -1,16 +1,23 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import type { DisponibilidadConFranjas } from "@/types/disponibilidad";
+import type { ConfiguracionAgenda, DisponibilidadConFranjas } from "@/types/disponibilidad";
 import { ConfiguracionForm } from "./ConfiguracionForm";
 import { guardarAgenda } from "./actions";
 
 export default async function ConfiguracionAgendaPage() {
   const supabase = await createClient();
-  const { data: disponibilidades } = await supabase
-    .from("disponibilidad")
-    .select("*, franja_horaria(*)")
-    .order("dia_semana")
-    .returns<DisponibilidadConFranjas[]>();
+  const [{ data: disponibilidades }, { data: configuracion }] = await Promise.all([
+    supabase
+      .from("disponibilidad")
+      .select("*, franja_horaria(*)")
+      .order("dia_semana")
+      .returns<DisponibilidadConFranjas[]>(),
+    // Puede no haber fila: ahí la duración queda sin configurar.
+    supabase
+      .from("configuracion_agenda")
+      .select("*")
+      .maybeSingle<ConfiguracionAgenda>(),
+  ]);
 
   const sinConfigurar = (disponibilidades?.length ?? 0) === 0;
 
@@ -28,12 +35,16 @@ export default async function ConfiguracionAgendaPage() {
           <p className="font-medium text-gray-900">Todavía no configuraste tu disponibilidad</p>
           <p className="mt-1 text-sm text-gray-500">
             Activá los días que atendés, cargá una o más franjas por día y elegí cuánto dura un
-            bloque en cada uno. Con eso la agenda va a poder calcular los turnos disponibles.
+            bloque. Con eso la agenda va a poder calcular los turnos disponibles.
           </p>
         </div>
       )}
 
-      <ConfiguracionForm action={guardarAgenda} disponibilidades={disponibilidades ?? []} />
+      <ConfiguracionForm
+        action={guardarAgenda}
+        disponibilidades={disponibilidades ?? []}
+        configuracion={configuracion ?? null}
+      />
     </div>
   );
 }

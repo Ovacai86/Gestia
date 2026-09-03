@@ -1,4 +1,4 @@
-import type { FranjaHoraria } from "@/types/disponibilidad";
+import type { DisponibilidadConFranjas, FranjaHoraria } from "@/types/disponibilidad";
 
 // Las fechas del calendario se manejan como "YYYY-MM-DD" en calendario
 // argentino. Para hacer aritmética se anclan a mediodía UTC: así sumar o
@@ -93,6 +93,74 @@ export function generarBloques(franjas: FranjaHoraria[], duracion: number): Bloq
   }
 
   return bloques.sort((a, b) => a.inicio.localeCompare(b.inicio));
+}
+
+// Los bloques que se pueden OFRECER para que los reserve un paciente, en una
+// fecha concreta.
+//
+// Ojo con la diferencia: esto no es lo mismo que la grilla de /turnos. Ahí el
+// profesional puede cargar un turno en cualquier horario, incluso fuera de su
+// disponibilidad (queda marcado "Fuera de horario"). Acá no: lo que sale de
+// esta función es lo único que se le puede llegar a mostrar a un paciente, así
+// que nunca puede incluir un horario fuera de la disponibilidad configurada.
+//
+// La regla, entonces, es que se devuelve lista vacía si:
+//   - no hay duración configurada,
+//   - el día de la semana no está en disponibilidad,
+//   - el día está en disponibilidad pero con activo = false,
+//   - el día está activo pero sin franjas cargadas.
+// Y si hay franjas, los bloques salen solo de adentro de esas franjas: un
+// bloque que se pasaría del fin de la franja no se genera (lo garantiza la
+// condición `minuto + duracion <= fin` de generarBloques).
+export function bloquesOfrecibles(
+  fecha: string,
+  disponibilidades: DisponibilidadConFranjas[],
+  duracion: number,
+): Bloque[] {
+  if (duracion <= 0) {
+    return [];
+  }
+
+  const delDia = disponibilidades.find((d) => d.dia_semana === diaSemanaDe(fecha));
+  if (!delDia || !delDia.activo) {
+    return [];
+  }
+
+  return generarBloques(delDia.franja_horaria ?? [], duracion);
+}
+
+// Si un horario puntual se puede ofrecer o no. Es el mismo criterio que
+// bloquesOfrecibles, pero para validar del lado del servidor lo que llegue de
+// una reserva: nunca alcanza con que el front no lo haya mostrado.
+export function esHorarioOfrecible(
+  fecha: string,
+  hora: string,
+  disponibilidades: DisponibilidadConFranjas[],
+  duracion: number,
+): boolean {
+  return bloquesOfrecibles(fecha, disponibilidades, duracion).some(
+    (bloque) => bloque.inicio === hora,
+  );
+}
+
+// Si un "HH:MM" cae dentro de alguna franja de ese día. A diferencia de
+// esHorarioOfrecible, no exige que arranque justo donde arranca un bloque: es
+// para avisarle al profesional que un turno suyo quedó fuera de horario, no
+// para decidir qué se le ofrece a un paciente.
+export function caeEnDisponibilidad(
+  fecha: string,
+  hora: string,
+  disponibilidades: DisponibilidadConFranjas[],
+): boolean {
+  const delDia = disponibilidades.find((d) => d.dia_semana === diaSemanaDe(fecha));
+  if (!delDia || !delDia.activo) {
+    return false;
+  }
+
+  const minuto = aMinutos(hora);
+  return (delDia.franja_horaria ?? []).some(
+    (f) => minuto >= aMinutos(f.hora_inicio) && minuto < aMinutos(f.hora_fin),
+  );
 }
 
 // La fila de la grilla a la que pertenece un "HH:MM".

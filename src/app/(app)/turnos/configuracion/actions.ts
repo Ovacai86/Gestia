@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { DIAS_SEMANA, DURACION_POR_DEFECTO, HORARIO_POR_DEFECTO } from "@/types/disponibilidad";
+import { DIAS_SEMANA, HORARIO_POR_DEFECTO } from "@/types/disponibilidad";
 
 export type AgendaFormState = { error: string | null; guardado: boolean };
 
@@ -11,12 +11,17 @@ type FranjaInput = { hora_inicio: string; hora_fin: string };
 type DiaInput = {
   dia_semana: number;
   activo: boolean;
-  duracion_bloque_minutos: number;
   franjas: FranjaInput[];
 };
 
-function readAgendaForm(formData: FormData): DiaInput[] {
-  return DIAS_SEMANA.map((_, i) => {
+type AgendaInput = {
+  // String vacío = duración sin configurar.
+  duracion: string;
+  dias: DiaInput[];
+};
+
+function readAgendaForm(formData: FormData): AgendaInput {
+  const dias = DIAS_SEMANA.map((_, i) => {
     const cantidad = Number(formData.get(`dias.${i}.franjas.length`) ?? 0);
     const franjas: FranjaInput[] = [];
 
@@ -30,23 +35,38 @@ function readAgendaForm(formData: FormData): DiaInput[] {
     return {
       dia_semana: i,
       activo: formData.get(`dias.${i}.activo`) === "true",
-      duracion_bloque_minutos: Number(formData.get(`dias.${i}.duracion_bloque_minutos`) ?? 0),
       franjas,
     };
   });
+
+  return {
+    duracion: String(formData.get("duracion_bloque_minutos") ?? "").trim(),
+    dias,
+  };
 }
 
-function validarAgenda(dias: DiaInput[]): string | null {
-  for (const dia of dias) {
+function validarAgenda(agenda: AgendaInput): string | null {
+  const hayDiaActivo = agenda.dias.some((dia) => dia.activo);
+
+  // Sin ningún día activo la duración puede quedar vacía: no hay bloques que
+  // medir. Con al menos un día activo, es obligatoria.
+  if (hayDiaActivo) {
+    if (!agenda.duracion) {
+      return "Poné una duración para los turnos.";
+    }
+    const duracion = Number(agenda.duracion);
+    if (!Number.isInteger(duracion) || duracion <= 0) {
+      return "La duración tiene que ser un número entero de minutos mayor a cero.";
+    }
+  }
+
+  for (const dia of agenda.dias) {
     if (!dia.activo) {
       continue;
     }
 
     const nombre = DIAS_SEMANA[dia.dia_semana];
 
-    if (!Number.isInteger(dia.duracion_bloque_minutos) || dia.duracion_bloque_minutos <= 0) {
-      return `La duración de ${nombre} tiene que ser un número entero de minutos mayor a cero.`;
-    }
     if (dia.franjas.length === 0) {
       return `Agregá al menos una franja para ${nombre}.`;
     }
@@ -92,8 +112,8 @@ export async function guardarAgenda(
   _prevState: AgendaFormState,
   formData: FormData,
 ): Promise<AgendaFormState> {
-  const dias = readAgendaForm(formData);
-  const error = validarAgenda(dias);
+  const agenda = readAgendaForm(formData);
+  const error = validarAgenda(agenda);
   if (error) {
     return { error, guardado: false };
   }
@@ -107,17 +127,37 @@ export async function guardarAgenda(
     return { error: "Se venció la sesión. Volvé a entrar.", guardado: false };
   }
 
+  // La duración es una sola para toda la agenda. Si el campo vino vacío se
+  // borra la fila: la duración vuelve a quedar sin configurar.
+  const duracion = Number(agenda.duracion);
+  if (agenda.duracion && Number.isInteger(duracion) && duracion > 0) {
+    const { error: configError } = await supabase
+      .from("configuracion_agenda")
+      .upsert({ user_id: user.id, duracion_bloque_minutos: duracion }, { onConflict: "user_id" });
+
+    if (configError) {
+      return { error: configError.message, guardado: false };
+    }
+  } else {
+    const { error: configError } = await supabase
+      .from("configuracion_agenda")
+      .delete()
+      .eq("user_id", user.id);
+
+    if (configError) {
+      return { error: configError.message, guardado: false };
+    }
+  }
+
   // user_id va explícito (y no por el default auth.uid()) para que el
   // onConflict tenga con qué resolver el upsert.
   const { data: guardados, error: diasError } = await supabase
     .from("disponibilidad")
     .upsert(
-      dias.map((dia) => ({
+      agenda.dias.map((dia) => ({
         user_id: user.id,
         dia_semana: dia.dia_semana,
         activo: dia.activo,
-        duracion_bloque_minutos:
-          dia.duracion_bloque_minutos > 0 ? dia.duracion_bloque_minutos : DURACION_POR_DEFECTO,
       })),
       { onConflict: "user_id,dia_semana" },
     )
@@ -139,7 +179,7 @@ export async function guardarAgenda(
     return { error: borradoError.message, guardado: false };
   }
 
-  const filas = dias.flatMap((dia) => {
+  const filas = agenda.dias.flatMap((dia) => {
     const disponibilidadId = idPorDia.get(dia.dia_semana);
     if (!disponibilidadId) {
       return [];

@@ -68,16 +68,24 @@ create table if not exists gasto (
 
 -- Un día de la semana en la agenda: un registro por día y por usuario.
 -- El día se desactiva con activo = false en vez de borrarse, para no perder
--- las franjas ya cargadas. La duración del bloque es por día.
+-- las franjas ya cargadas. La duración del bloque no vive acá: es una sola
+-- para toda la agenda y está en configuracion_agenda.
 create table if not exists disponibilidad (
   id uuid primary key default gen_random_uuid(),
   dia_semana int not null
     constraint disponibilidad_dia_semana_check check (dia_semana between 0 and 6),
   activo boolean not null default true,
-  duracion_bloque_minutos int not null default 50
-    constraint disponibilidad_duracion_check check (duracion_bloque_minutos > 0),
   user_id uuid not null references auth.users (id) default auth.uid(),
   constraint disponibilidad_dia_unico unique (user_id, dia_semana)
+);
+
+-- La duración del bloque, única para toda la agenda. Sin default: mientras no
+-- haya fila, la duración está "sin configurar" y la agenda no ofrece bloques.
+create table if not exists configuracion_agenda (
+  id uuid primary key default gen_random_uuid(),
+  duracion_bloque_minutos int not null
+    constraint configuracion_agenda_duracion_check check (duracion_bloque_minutos > 0),
+  user_id uuid not null unique references auth.users (id) default auth.uid()
 );
 
 -- Los tramos de atención de un día. Van en tabla aparte para soportar el día
@@ -96,6 +104,7 @@ create index if not exists turno_user_id_idx on turno (user_id);
 create index if not exists turno_paciente_id_idx on turno (paciente_id);
 create index if not exists gasto_user_id_idx on gasto (user_id);
 create index if not exists disponibilidad_user_id_idx on disponibilidad (user_id);
+create index if not exists configuracion_agenda_user_id_idx on configuracion_agenda (user_id);
 create index if not exists franja_horaria_user_id_idx on franja_horaria (user_id);
 create index if not exists franja_horaria_disponibilidad_id_idx on franja_horaria (disponibilidad_id);
 
@@ -103,6 +112,7 @@ alter table paciente enable row level security;
 alter table turno enable row level security;
 alter table gasto enable row level security;
 alter table disponibilidad enable row level security;
+alter table configuracion_agenda enable row level security;
 alter table franja_horaria enable row level security;
 
 create policy "paciente_select_own" on paciente for select using (user_id = auth.uid());
@@ -124,6 +134,11 @@ create policy "disponibilidad_select_own" on disponibilidad for select using (us
 create policy "disponibilidad_insert_own" on disponibilidad for insert with check (user_id = auth.uid());
 create policy "disponibilidad_update_own" on disponibilidad for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "disponibilidad_delete_own" on disponibilidad for delete using (user_id = auth.uid());
+
+create policy "configuracion_agenda_select_own" on configuracion_agenda for select using (user_id = auth.uid());
+create policy "configuracion_agenda_insert_own" on configuracion_agenda for insert with check (user_id = auth.uid());
+create policy "configuracion_agenda_update_own" on configuracion_agenda for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "configuracion_agenda_delete_own" on configuracion_agenda for delete using (user_id = auth.uid());
 
 create policy "franja_horaria_select_own" on franja_horaria for select using (user_id = auth.uid());
 create policy "franja_horaria_insert_own" on franja_horaria for insert with check (user_id = auth.uid());
@@ -297,6 +312,30 @@ begin
 end
 $migracion$;
 
--- configuracion_agenda queda sin uso: su único dato ya se copió a cada día.
--- Cuando confirmes que la agenda anda bien, se puede borrar con:
---   drop table configuracion_agenda;
+-- Migración: la duración del bloque vuelve a ser global.
+-- Deja de estar por día en disponibilidad y vuelve a configuracion_agenda,
+-- que ya existía sin uso. No se migra ningún valor: el campo arranca vacío
+-- (sin fila) y el profesional carga la duración a mano desde la pantalla de
+-- disponibilidad. Sin fila, la agenda no ofrece bloques.
+-- Este bloque es idempotente: se puede correr desde acá hasta el final.
+
+delete from configuracion_agenda;
+
+alter table configuracion_agenda
+  alter column duracion_bloque_minutos drop default;
+
+alter table configuracion_agenda enable row level security;
+
+drop policy if exists "configuracion_agenda_select_own" on configuracion_agenda;
+drop policy if exists "configuracion_agenda_insert_own" on configuracion_agenda;
+drop policy if exists "configuracion_agenda_update_own" on configuracion_agenda;
+drop policy if exists "configuracion_agenda_delete_own" on configuracion_agenda;
+create policy "configuracion_agenda_select_own" on configuracion_agenda for select using (user_id = auth.uid());
+create policy "configuracion_agenda_insert_own" on configuracion_agenda for insert with check (user_id = auth.uid());
+create policy "configuracion_agenda_update_own" on configuracion_agenda for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "configuracion_agenda_delete_own" on configuracion_agenda for delete using (user_id = auth.uid());
+
+create index if not exists configuracion_agenda_user_id_idx on configuracion_agenda (user_id);
+
+-- Al borrar la columna se va con ella su check de duración.
+alter table disponibilidad drop column if exists duracion_bloque_minutos;

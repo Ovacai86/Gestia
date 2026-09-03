@@ -6,8 +6,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import type { AgendaFormState } from "./actions";
 import {
   DIAS_SEMANA,
-  DURACION_POR_DEFECTO,
   HORARIO_POR_DEFECTO,
+  type ConfiguracionAgenda,
   type DisponibilidadConFranjas,
 } from "@/types/disponibilidad";
 import { agendaSchema, type AgendaFormValues } from "@/lib/validations/agenda";
@@ -21,8 +21,14 @@ function aHoraInput(hora: string) {
   return hora.slice(0, 5);
 }
 
-function valoresIniciales(disponibilidades: DisponibilidadConFranjas[]): AgendaFormValues {
+function valoresIniciales(
+  disponibilidades: DisponibilidadConFranjas[],
+  configuracion: ConfiguracionAgenda | null,
+): AgendaFormValues {
   return {
+    // Sin fila de configuración el campo arranca vacío: no hay duración por
+    // defecto, la carga el profesional.
+    duracion_bloque_minutos: configuracion ? String(configuracion.duracion_bloque_minutos) : "",
     dias: DIAS_SEMANA.map((_, i) => {
       const guardado = disponibilidades.find((d) => d.dia_semana === i);
       const franjas = (guardado?.franja_horaria ?? [])
@@ -35,9 +41,6 @@ function valoresIniciales(disponibilidades: DisponibilidadConFranjas[]): AgendaF
       return {
         dia_semana: i,
         activo: guardado?.activo ?? false,
-        duracion_bloque_minutos: String(
-          guardado?.duracion_bloque_minutos ?? DURACION_POR_DEFECTO,
-        ),
         // Un día sin franjas arranca con una propuesta, para que activarlo no
         // deje la fila vacía.
         franjas:
@@ -117,25 +120,27 @@ function FranjasDelDia({
 export function ConfiguracionForm({
   action,
   disponibilidades,
+  configuracion,
 }: {
   action: (state: AgendaFormState, formData: FormData) => Promise<AgendaFormState>;
   disponibilidades: DisponibilidadConFranjas[];
+  configuracion: ConfiguracionAgenda | null;
 }) {
   const [state, formAction, pending] = useActionState(action, { error: null, guardado: false });
 
   const form = useForm<AgendaFormValues>({
     resolver: zodResolver(agendaSchema),
-    defaultValues: valoresIniciales(disponibilidades),
+    defaultValues: valoresIniciales(disponibilidades, configuracion),
   });
 
-  // Las franjas y la duración de un día solo se muestran si el día está activo.
+  // Las franjas de un día solo se muestran si el día está activo.
   const dias = useWatch({ control: form.control, name: "dias" });
 
   function onValid(values: AgendaFormValues) {
     const formData = new FormData();
+    formData.set("duracion_bloque_minutos", values.duracion_bloque_minutos);
     values.dias.forEach((dia, i) => {
       formData.set(`dias.${i}.activo`, String(dia.activo));
-      formData.set(`dias.${i}.duracion_bloque_minutos`, dia.duracion_bloque_minutos);
       formData.set(`dias.${i}.franjas.length`, String(dia.franjas.length));
       dia.franjas.forEach((franja, j) => {
         formData.set(`dias.${i}.franjas.${j}.hora_inicio`, franja.hora_inicio);
@@ -152,6 +157,27 @@ export function ConfiguracionForm({
     <Form {...form}>
       {/* noValidate: la validación la maneja Zod, no el navegador. */}
       <form onSubmit={form.handleSubmit(onValid)} noValidate className="mx-auto max-w-2xl space-y-6">
+        {/* La duración es una sola para toda la agenda, no una por día. */}
+        <div>
+          <h2 className="mb-2 text-sm font-medium text-gray-700">Duración del turno</h2>
+          <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+            <FormField
+              control={form.control}
+              name="duracion_bloque_minutos"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs text-gray-500">Minutos</FormLabel>
+                  <Input {...field} type="number" min={1} step={1} className="w-32" />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Aplica a todos los días. Se carga en minutos, con números enteros.
+                  </p>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+        </div>
+
         <div>
           <h2 className="mb-2 text-sm font-medium text-gray-700">Días de atención</h2>
           <div className="divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
@@ -172,22 +198,8 @@ export function ConfiguracionForm({
                   />
 
                   {activo ? (
-                    <div className="flex-1 space-y-3">
+                    <div className="flex-1">
                       <FranjasDelDia control={form.control} indice={i} />
-
-                      <FormField
-                        control={form.control}
-                        name={`dias.${i}.duracion_bloque_minutos`}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel className="text-xs text-gray-500">
-                              Duración del bloque (min)
-                            </FormLabel>
-                            <Input {...field} type="number" min={1} step={1} className="w-32" />
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
                     </div>
                   ) : (
                     <p className="pt-2 text-sm text-gray-400">Sin atención</p>

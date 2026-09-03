@@ -11,30 +11,12 @@ const diaSchema = z
   .object({
     dia_semana: z.number().int().min(0).max(6),
     activo: z.boolean(),
-    // Numérico como string + validación a mano: z.coerce.number() rompe la
-    // inferencia de tipos entre el resolver y useForm.
-    duracion_bloque_minutos: z.string().trim(),
     franjas: z.array(franjaSchema),
   })
   .superRefine((dia, ctx) => {
     // Un día apagado no se valida: sus franjas son solo lo que queda guardado.
     if (!dia.activo) {
       return;
-    }
-
-    const duracion = Number(dia.duracion_bloque_minutos);
-    if (!dia.duracion_bloque_minutos) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["duracion_bloque_minutos"],
-        message: "Poné una duración.",
-      });
-    } else if (!Number.isInteger(duracion) || duracion <= 0) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["duracion_bloque_minutos"],
-        message: "Tiene que ser un número entero de minutos mayor a cero.",
-      });
     }
 
     if (dia.franjas.length === 0) {
@@ -91,8 +73,36 @@ const diaSchema = z
     }
   });
 
-export const agendaSchema = z.object({
-  dias: z.array(diaSchema).length(7),
-});
+// La duración es una sola para toda la agenda y arranca vacía: no hay valor
+// por defecto. Numérico como string + validación a mano, igual que el resto de
+// los campos numéricos del proyecto: z.coerce.number() rompe la inferencia de
+// tipos entre el resolver y useForm.
+export const agendaSchema = z
+  .object({
+    duracion_bloque_minutos: z.string().trim(),
+    dias: z.array(diaSchema).length(7),
+  })
+  .superRefine((agenda, ctx) => {
+    // Sin ningún día activo no hay nada que dure: la duración puede quedar
+    // vacía y la agenda simplemente no ofrece bloques.
+    if (!agenda.dias.some((dia) => dia.activo)) {
+      return;
+    }
+
+    const duracion = Number(agenda.duracion_bloque_minutos);
+    if (!agenda.duracion_bloque_minutos) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["duracion_bloque_minutos"],
+        message: "Poné una duración.",
+      });
+    } else if (!Number.isInteger(duracion) || duracion <= 0) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["duracion_bloque_minutos"],
+        message: "Tiene que ser un número entero de minutos mayor a cero.",
+      });
+    }
+  });
 
 export type AgendaFormValues = z.infer<typeof agendaSchema>;

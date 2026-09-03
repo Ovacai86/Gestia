@@ -2,7 +2,7 @@ import { Fragment } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import type { TurnoConPaciente, TurnoEstado } from "@/types/turno";
-import type { DisponibilidadConFranjas } from "@/types/disponibilidad";
+import type { ConfiguracionAgenda, DisponibilidadConFranjas } from "@/types/disponibilidad";
 import { DIAS_SEMANA } from "@/types/disponibilidad";
 import type { Bloque } from "@/lib/agenda";
 import {
@@ -69,7 +69,7 @@ export default async function TurnosPage({
   const ultima = visibles[visibles.length - 1];
 
   const supabase = await createClient();
-  const [{ data: turnos }, { data: disponibilidades }] = await Promise.all([
+  const [{ data: turnos }, { data: disponibilidades }, { data: configuracion }] = await Promise.all([
     supabase
       .from("turno")
       .select("*, paciente(nombre_apellido)")
@@ -82,10 +82,15 @@ export default async function TurnosPage({
       .select("*, franja_horaria(*)")
       .eq("activo", true)
       .returns<DisponibilidadConFranjas[]>(),
+    // Puede no haber fila: ahí la duración está sin configurar.
+    supabase.from("configuracion_agenda").select("*").maybeSingle<ConfiguracionAgenda>(),
   ]);
 
   const listaTurnos = turnos ?? [];
   const activas = disponibilidades ?? [];
+  // Una sola duración para toda la agenda. Sin configurar vale 0, y con 0
+  // generarBloques no devuelve ningún bloque.
+  const duracionBloque = configuracion?.duracion_bloque_minutos ?? 0;
 
   const diaHabilitado = (fecha: string) =>
     activas.some((d) => d.dia_semana === diaSemanaDe(fecha));
@@ -110,18 +115,15 @@ export default async function TurnosPage({
     }
   }
 
-  // Cada día arma sus bloques con sus propias franjas y su propia duración.
-  // Un bloque más largo que una hora ocupa varias filas: solo la primera es
-  // clickeable, las siguientes son continuación.
+  // Cada día arma sus bloques con sus propias franjas, pero todos con la misma
+  // duración. Un bloque más largo que una hora ocupa varias filas: solo la
+  // primera es clickeable, las siguientes son continuación.
   const columnas = fechasSemana.map((fecha) => {
     const disponibilidad = activas.find((d) => d.dia_semana === diaSemanaDe(fecha));
     const porHora = new Map<number, { bloque: Bloque; esInicio: boolean }>();
 
     if (disponibilidad) {
-      const bloques = generarBloques(
-        disponibilidad.franja_horaria ?? [],
-        disponibilidad.duracion_bloque_minutos,
-      );
+      const bloques = generarBloques(disponibilidad.franja_horaria ?? [], duracionBloque);
       for (const bloque of bloques) {
         bloque.horas.forEach((hora, i) => porHora.set(hora, { bloque, esInicio: i === 0 }));
       }
@@ -130,7 +132,7 @@ export default async function TurnosPage({
     return {
       fecha,
       habilitado: !!disponibilidad,
-      duracion: disponibilidad?.duracion_bloque_minutos ?? 0,
+      duracion: duracionBloque,
       porHora,
     };
   });
