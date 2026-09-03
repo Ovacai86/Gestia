@@ -2,7 +2,10 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { Turno } from "@/types/turno";
 import { TurnoForm } from "../TurnoForm";
-import { actualizarTurno, eliminarTurno } from "../actions";
+import { RepetirSerieForm } from "../RepetirSerieForm";
+import { actualizarTurno, eliminarTurno, repetirTurno } from "../actions";
+import { DIAS_SEMANA } from "@/types/disponibilidad";
+import { diaSemanaDe, fechaHoraEnAR, sumarDias } from "@/lib/agenda";
 
 export default async function EditarTurnoPage({
   params,
@@ -44,6 +47,12 @@ export default async function EditarTurnoPage({
       : (activos ?? []);
 
   const actualizarEsteTurno = actualizarTurno.bind(null, id);
+  const repetirEsteTurno = repetirTurno.bind(null, id);
+
+  // La serie repite el mismo día de la semana y horario del turno, arrancando
+  // una semana después: el original no se duplica.
+  const { fecha: fechaTurno, hora: horaTurno } = fechaHoraEnAR(turno.fecha_hora);
+  const diaYHora = `${DIAS_SEMANA[diaSemanaDe(fechaTurno)]} a las ${horaTurno}`;
 
   return (
     <div>
@@ -57,6 +66,11 @@ export default async function EditarTurnoPage({
         </form>
       </div>
       <TurnoForm action={actualizarEsteTurno} pacientes={pacientes} turno={turno} />
+      <RepetirSerieForm
+        action={repetirEsteTurno}
+        primeraFecha={sumarDias(fechaTurno, 7)}
+        diaYHora={diaYHora}
+      />
     </div>
   );
 }

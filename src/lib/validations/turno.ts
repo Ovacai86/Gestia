@@ -54,3 +54,11 @@ export const turnoSchema = z
   });
 
 export type TurnoFormValues = z.infer<typeof turnoSchema>;
+
+// Repetir un turno que ya existe: lo único que se pide es hasta cuándo. Que la
+// fecha sea posterior al turno lo valida el server, que es el que lo conoce.
+export const repetirTurnoSchema = z.object({
+  fecha_fin_recurrencia: z.string().trim().min(1, "Poné hasta qué fecha se repite."),
+});
+
+export type RepetirTurnoFormValues = z.infer<typeof repetirTurnoSchema>;
