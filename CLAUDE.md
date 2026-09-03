@@ -34,29 +34,36 @@ No agregar estas features salvo que se pida explícitamente.
 ### paciente
 - id (uuid, PK)
 - nombre_apellido (text)
-- dni (text)
-- telefono (text)
-- email (text)
+- dni (text, nullable en la base)
+- telefono (text, nullable)
+- email (text, nullable)
 - obra_social (text, nullable)
 - notas (text, nullable)
 - monto_fijo (numeric, nullable — check: > 0)
-- fecha_alta (date)
+- fecha_alta (date, default hoy)
 - activo (boolean, default true)
 - user_id (uuid, FK a auth.users)
+
+El formulario exige nombre y DNI (7 u 8 dígitos), pero la base los acepta vacíos:
+la restricción es de UX, no de schema.
 
 ### turno
 - id (uuid, PK)
 - paciente_id (uuid, FK a paciente)
-- fecha_hora (timestamp)
-- duracion_minutos (int)
+- fecha_hora (timestamptz)
+- duracion_minutos (int, default 50)
 - estado (enum: programado / confirmado / realizado / cancelado)
-- monto (numeric)
+- monto (numeric, nullable — sin default)
 - pagado (boolean, default false)
 - motivo_cancelacion (text, nullable — solo aplica si estado = cancelado)
 - origen (text: 'profesional' / 'paciente', default 'profesional')
 - aceptado_por_profesional (boolean, not null, sin default)
 - user_id (uuid, FK a auth.users)
 
+`monto` sale del `monto_fijo` del paciente al crear el turno y queda congelado en
+la fila: si después cambia la ficha, los turnos ya creados no se tocan. Si el
+paciente no tiene monto definido, el turno se guarda igual con monto null y el
+balance lo suma como cero.
 `origen` deja preparada el alta de turno pedida por el paciente, pero en v1 la app
 siempre inserta 'profesional': no hay portal de paciente.
 `aceptado_por_profesional` no lleva default de columna (un default no puede
@@ -71,6 +78,9 @@ referenciar otra columna de la misma fila): lo completa el trigger
 - categoria (text)
 - descripcion (text, nullable)
 - user_id (uuid, FK a auth.users)
+
+La categoría es texto libre en la base: las cinco opciones (`GASTO_CATEGORIAS` en
+`src/types/gasto.ts`) las impone el formulario, no el schema.
 
 ### disponibilidad
 - id (uuid, PK)
@@ -118,11 +128,15 @@ Todo cuelga del grupo `(app)`, que exige sesión; `/login` es la única ruta pú
 - `/turnos` — agenda con vista de semana y de mes, navegable por fecha
 - `/turnos/nuevo` — alta de turno, con opción de repetirlo semanalmente hasta una
   fecha de fin (tope de 200 turnos por recurrencia)
-- `/turnos/[id]` — edición de un turno
+- `/turnos/[id]` — edición de un turno, y desde ahí se puede repetir semanalmente
+  hacia adelante: crea las semanas siguientes con el mismo día, horario, paciente,
+  duración y monto, sin tocar ni duplicar el original
 - `/turnos/configuracion` — disponibilidad: qué días se atiende, una o más franjas
   horarias por día y la duración del bloque (global, en configuracion_agenda). Es la
   pantalla que alimenta los bloques que ofrece la agenda: sin días cargados o sin
-  duración, la agenda no propone ningún horario.
+  duración, la agenda no propone ningún horario. Abajo se cargan las excepciones
+  (fechas puntuales bloqueadas); al guardar una, los turnos que quedan adentro no se
+  tocan: se listan para resolverlos a mano.
 - `/gastos`, `/gastos/nuevo`, `/gastos/[id]` — listado, alta y edición
 - `/balance` — totales de ingresos y egresos
 
