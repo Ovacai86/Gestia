@@ -6,6 +6,18 @@ import { createClient } from "@/lib/supabase/server";
 
 export type PacienteFormState = { error: string | null };
 
+// Vacío queda en null (todavía sin definir); un valor no numérico o menor o
+// igual a cero también, para que la constraint de la tabla no lo rechace.
+function leerMontoFijo(formData: FormData): number | null {
+  const crudo = String(formData.get("monto_fijo") ?? "").trim();
+  if (!crudo) {
+    return null;
+  }
+
+  const monto = Number(crudo);
+  return Number.isFinite(monto) && monto > 0 ? monto : null;
+}
+
 function readPacienteForm(formData: FormData) {
   return {
     nombre_apellido: String(formData.get("nombre_apellido") ?? "").trim(),
@@ -14,6 +26,7 @@ function readPacienteForm(formData: FormData) {
     email: String(formData.get("email") ?? "").trim() || null,
     obra_social: String(formData.get("obra_social") ?? "").trim() || null,
     notas: String(formData.get("notas") ?? "").trim() || null,
+    monto_fijo: leerMontoFijo(formData),
     activo: formData.get("activo") === "on",
   };
 }

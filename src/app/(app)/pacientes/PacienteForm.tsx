@@ -31,6 +31,7 @@ export function PacienteForm({
       email: paciente?.email ?? "",
       obra_social: paciente?.obra_social ?? "",
       notas: paciente?.notas ?? "",
+      monto_fijo: paciente?.monto_fijo != null ? String(paciente.monto_fijo) : "",
       activo: paciente?.activo ?? true,
     },
   });
@@ -43,6 +44,7 @@ export function PacienteForm({
     formData.set("email", values.email ?? "");
     formData.set("obra_social", values.obra_social ?? "");
     formData.set("notas", values.notas ?? "");
+    formData.set("monto_fijo", values.monto_fijo);
     if (values.activo) {
       formData.set("activo", "on");
     }
@@ -106,17 +108,37 @@ export function PacienteForm({
           )}
         />
 
-        <FormField
-          control={form.control}
-          name="obra_social"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Obra social</FormLabel>
-              <Input {...field} />
-              <FormMessage />
-            </FormItem>
-          )}
-        />
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            control={form.control}
+            name="obra_social"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Obra social</FormLabel>
+                <Input {...field} />
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="monto_fijo"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Monto por sesión</FormLabel>
+                <Input
+                  {...field}
+                  inputMode="decimal"
+                  aria-invalid={!!form.formState.errors.monto_fijo}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Se usa como monto al crear un turno de este paciente.
+                </p>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
 
         <FormField
           control={form.control}

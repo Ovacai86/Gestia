@@ -11,6 +11,10 @@ create table if not exists paciente (
   email text,
   obra_social text,
   notas text,
+  -- Lo que cobra este paciente por sesión. Se copia a turno.monto al crear el
+  -- turno; nullable mientras no se haya definido.
+  monto_fijo numeric(10, 2)
+    constraint paciente_monto_fijo_check check (monto_fijo is null or monto_fijo > 0),
   fecha_alta date not null default current_date,
   activo boolean not null default true,
   user_id uuid not null references auth.users (id) default auth.uid()
@@ -339,3 +343,20 @@ create index if not exists configuracion_agenda_user_id_idx on configuracion_age
 
 -- Al borrar la columna se va con ella su check de duración.
 alter table disponibilidad drop column if exists duracion_bloque_minutos;
+
+-- Migración: monto fijo por paciente.
+-- Lo que se le cobra a ese paciente por sesión. El alta de turno lo copia a
+-- turno.monto, así que un cambio posterior no toca los turnos ya creados.
+-- Este bloque es idempotente: se puede correr desde acá hasta el final.
+
+alter table paciente
+  add column if not exists monto_fijo numeric(10, 2);
+
+do $migracion$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'paciente_monto_fijo_check') then
+    alter table paciente
+      add constraint paciente_monto_fijo_check check (monto_fijo is null or monto_fijo > 0);
+  end if;
+end
+$migracion$;

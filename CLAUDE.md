@@ -39,6 +39,7 @@ No agregar estas features salvo que se pida explícitamente.
 - email (text)
 - obra_social (text, nullable)
 - notas (text, nullable)
+- monto_fijo (numeric, nullable — check: > 0)
 - fecha_alta (date)
 - activo (boolean, default true)
 - user_id (uuid, FK a auth.users)

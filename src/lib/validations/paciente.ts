@@ -25,6 +25,15 @@ export const pacienteSchema = z.object({
     .or(z.literal("")),
   obra_social: z.string().trim().optional(),
   notas: z.string().trim().optional(),
+  // Numérico como string con refine, no z.coerce.number(): coerce rompe la
+  // inferencia entre el resolver y useForm. Vacío = todavía sin definir.
+  monto_fijo: z
+    .string()
+    .trim()
+    .refine(
+      (v) => v === "" || (Number.isFinite(Number(v)) && Number(v) > 0),
+      "El monto fijo debe ser mayor a cero.",
+    ),
   activo: z.boolean(),
 });
 
