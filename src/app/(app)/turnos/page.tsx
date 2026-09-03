@@ -2,7 +2,11 @@ import { Fragment } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import type { TurnoConPaciente, TurnoEstado } from "@/types/turno";
-import type { ConfiguracionAgenda, DisponibilidadConFranjas } from "@/types/disponibilidad";
+import type {
+  ConfiguracionAgenda,
+  DisponibilidadConFranjas,
+  ExcepcionDisponibilidad,
+} from "@/types/disponibilidad";
 import { DIAS_SEMANA } from "@/types/disponibilidad";
 import type { Bloque } from "@/lib/agenda";
 import {
@@ -11,6 +15,7 @@ import {
   fechaHoraEnAR,
   formatearMes,
   formatearRangoSemana,
+  excepcionesDe,
   generarBloques,
   horaDe,
   hoyEnAR,
@@ -69,7 +74,12 @@ export default async function TurnosPage({
   const ultima = visibles[visibles.length - 1];
 
   const supabase = await createClient();
-  const [{ data: turnos }, { data: disponibilidades }, { data: configuracion }] = await Promise.all([
+  const [
+    { data: turnos },
+    { data: disponibilidades },
+    { data: configuracion },
+    { data: excepciones },
+  ] = await Promise.all([
     supabase
       .from("turno")
       .select("*, paciente(nombre_apellido)")
@@ -84,10 +94,18 @@ export default async function TurnosPage({
       .returns<DisponibilidadConFranjas[]>(),
     // Puede no haber fila: ahí la duración está sin configurar.
     supabase.from("configuracion_agenda").select("*").maybeSingle<ConfiguracionAgenda>(),
+    // Las fechas bloqueadas que caen dentro de lo que se está mostrando.
+    supabase
+      .from("excepcion_disponibilidad")
+      .select("*")
+      .gte("fecha", visibles[0])
+      .lte("fecha", visibles[visibles.length - 1])
+      .returns<ExcepcionDisponibilidad[]>(),
   ]);
 
   const listaTurnos = turnos ?? [];
   const activas = disponibilidades ?? [];
+  const listaExcepciones = excepciones ?? [];
   // Una sola duración para toda la agenda. Sin configurar vale 0, y con 0
   // generarBloques no devuelve ningún bloque.
   const duracionBloque = configuracion?.duracion_bloque_minutos ?? 0;
@@ -123,7 +141,11 @@ export default async function TurnosPage({
     const porHora = new Map<number, { bloque: Bloque; esInicio: boolean }>();
 
     if (disponibilidad) {
-      const bloques = generarBloques(disponibilidad.franja_horaria ?? [], duracionBloque);
+      const bloques = generarBloques(
+        disponibilidad.franja_horaria ?? [],
+        duracionBloque,
+        excepcionesDe(fecha, listaExcepciones),
+      );
       for (const bloque of bloques) {
         bloque.horas.forEach((hora, i) => porHora.set(hora, { bloque, esInicio: i === 0 }));
       }

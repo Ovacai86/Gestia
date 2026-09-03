@@ -103,6 +103,18 @@ create table if not exists franja_horaria (
   constraint franja_horaria_rango_check check (hora_fin > hora_inicio)
 );
 
+-- Un rango de un día puntual en el que no se atiende, sin tocar la semana
+-- recurrente: vacaciones, un feriado o un día con horario distinto. Bloquea
+-- los bloques de la agenda que caen adentro.
+create table if not exists excepcion_disponibilidad (
+  id uuid primary key default gen_random_uuid(),
+  fecha date not null,
+  hora_inicio time not null,
+  hora_fin time not null,
+  user_id uuid not null references auth.users (id) default auth.uid(),
+  constraint excepcion_disponibilidad_rango_check check (hora_fin > hora_inicio)
+);
+
 create index if not exists paciente_user_id_idx on paciente (user_id);
 create index if not exists turno_user_id_idx on turno (user_id);
 create index if not exists turno_paciente_id_idx on turno (paciente_id);
@@ -111,6 +123,8 @@ create index if not exists disponibilidad_user_id_idx on disponibilidad (user_id
 create index if not exists configuracion_agenda_user_id_idx on configuracion_agenda (user_id);
 create index if not exists franja_horaria_user_id_idx on franja_horaria (user_id);
 create index if not exists franja_horaria_disponibilidad_id_idx on franja_horaria (disponibilidad_id);
+create index if not exists excepcion_disponibilidad_user_id_idx on excepcion_disponibilidad (user_id);
+create index if not exists excepcion_disponibilidad_fecha_idx on excepcion_disponibilidad (user_id, fecha);
 
 alter table paciente enable row level security;
 alter table turno enable row level security;
@@ -118,6 +132,7 @@ alter table gasto enable row level security;
 alter table disponibilidad enable row level security;
 alter table configuracion_agenda enable row level security;
 alter table franja_horaria enable row level security;
+alter table excepcion_disponibilidad enable row level security;
 
 create policy "paciente_select_own" on paciente for select using (user_id = auth.uid());
 create policy "paciente_insert_own" on paciente for insert with check (user_id = auth.uid());
@@ -148,6 +163,11 @@ create policy "franja_horaria_select_own" on franja_horaria for select using (us
 create policy "franja_horaria_insert_own" on franja_horaria for insert with check (user_id = auth.uid());
 create policy "franja_horaria_update_own" on franja_horaria for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "franja_horaria_delete_own" on franja_horaria for delete using (user_id = auth.uid());
+
+create policy "excepcion_disponibilidad_select_own" on excepcion_disponibilidad for select using (user_id = auth.uid());
+create policy "excepcion_disponibilidad_insert_own" on excepcion_disponibilidad for insert with check (user_id = auth.uid());
+create policy "excepcion_disponibilidad_update_own" on excepcion_disponibilidad for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "excepcion_disponibilidad_delete_own" on excepcion_disponibilidad for delete using (user_id = auth.uid());
 
 -- Migración: estado "confirmado" y motivo de cancelación en turno.
 -- Correr esto en un proyecto que ya tenía el schema anterior aplicado
@@ -360,3 +380,31 @@ begin
   end if;
 end
 $migracion$;
+
+-- Migración: excepciones de disponibilidad.
+-- Fechas puntuales bloqueadas (vacaciones, feriados, un día con otro horario)
+-- sin tocar la configuración semanal recurrente.
+-- Este bloque es idempotente: se puede correr desde acá hasta el final.
+
+create table if not exists excepcion_disponibilidad (
+  id uuid primary key default gen_random_uuid(),
+  fecha date not null,
+  hora_inicio time not null,
+  hora_fin time not null,
+  user_id uuid not null references auth.users (id) default auth.uid(),
+  constraint excepcion_disponibilidad_rango_check check (hora_fin > hora_inicio)
+);
+
+create index if not exists excepcion_disponibilidad_user_id_idx on excepcion_disponibilidad (user_id);
+create index if not exists excepcion_disponibilidad_fecha_idx on excepcion_disponibilidad (user_id, fecha);
+
+alter table excepcion_disponibilidad enable row level security;
+
+drop policy if exists "excepcion_disponibilidad_select_own" on excepcion_disponibilidad;
+drop policy if exists "excepcion_disponibilidad_insert_own" on excepcion_disponibilidad;
+drop policy if exists "excepcion_disponibilidad_update_own" on excepcion_disponibilidad;
+drop policy if exists "excepcion_disponibilidad_delete_own" on excepcion_disponibilidad;
+create policy "excepcion_disponibilidad_select_own" on excepcion_disponibilidad for select using (user_id = auth.uid());
+create policy "excepcion_disponibilidad_insert_own" on excepcion_disponibilidad for insert with check (user_id = auth.uid());
+create policy "excepcion_disponibilidad_update_own" on excepcion_disponibilidad for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy "excepcion_disponibilidad_delete_own" on excepcion_disponibilidad for delete using (user_id = auth.uid());

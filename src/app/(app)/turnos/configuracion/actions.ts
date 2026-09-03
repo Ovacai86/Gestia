@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { DIAS_SEMANA, HORARIO_POR_DEFECTO } from "@/types/disponibilidad";
+import { aMinutos, fechaHoraEnAR, inicioDelDiaISO, sumarDias } from "@/lib/agenda";
 
 export type AgendaFormState = { error: string | null; guardado: boolean };
 
@@ -199,4 +200,115 @@ export async function guardarAgenda(
   revalidatePath("/turnos/configuracion");
   revalidatePath("/turnos");
   return { error: null, guardado: true };
+}
+
+// Un turno ya agendado que quedó adentro de la excepción. No se toca: se lista
+// para que el profesional decida qué hacer con cada uno.
+export type TurnoEnConflicto = {
+  id: string;
+  hora: string;
+  paciente: string;
+};
+
+export type ExcepcionFormState = {
+  error: string | null;
+  guardado: boolean;
+  fecha?: string;
+  conflictos?: TurnoEnConflicto[];
+};
+
+type TurnoDelDia = {
+  id: string;
+  fecha_hora: string;
+  duracion_minutos: number;
+  paciente: { nombre_apellido: string } | null;
+};
+
+// Los turnos vivos de ese día que se solapan con el rango bloqueado. Se calcula
+// después de guardar: la excepción se crea igual, esto es solo el aviso.
+async function turnosEnConflicto(
+  fecha: string,
+  horaInicio: string,
+  horaFin: string,
+): Promise<TurnoEnConflicto[]> {
+  const supabase = await createClient();
+
+  const { data: turnos } = await supabase
+    .from("turno")
+    .select("id, fecha_hora, duracion_minutos, paciente(nombre_apellido)")
+    .neq("estado", "cancelado")
+    .gte("fecha_hora", inicioDelDiaISO(fecha))
+    .lt("fecha_hora", inicioDelDiaISO(sumarDias(fecha, 1)))
+    .order("fecha_hora")
+    .returns<TurnoDelDia[]>();
+
+  const desde = aMinutos(horaInicio);
+  const hasta = aMinutos(horaFin);
+
+  return (turnos ?? [])
+    .filter((turno) => {
+      const { hora } = fechaHoraEnAR(turno.fecha_hora);
+      const inicio = aMinutos(hora);
+      // Mismo criterio que en la agenda: alcanza con que se solapen.
+      return desde < inicio + turno.duracion_minutos && inicio < hasta;
+    })
+    .map((turno) => ({
+      id: turno.id,
+      hora: fechaHoraEnAR(turno.fecha_hora).hora,
+      paciente: turno.paciente?.nombre_apellido ?? "Sin paciente",
+    }));
+}
+
+// "Día completo" se guarda siempre como 00:00–23:59: no depende de los horarios
+// configurados, así que sigue bloqueando aunque después se amplíe la semana.
+const DIA_COMPLETO = { inicio: "00:00", fin: "23:59" } as const;
+
+export async function agregarExcepcion(
+  _prevState: ExcepcionFormState,
+  formData: FormData,
+): Promise<ExcepcionFormState> {
+  const fecha = String(formData.get("fecha") ?? "").trim();
+  const diaCompleto = formData.get("dia_completo") === "on";
+  const horaInicio = diaCompleto
+    ? DIA_COMPLETO.inicio
+    : String(formData.get("hora_inicio") ?? "").trim();
+  const horaFin = diaCompleto ? DIA_COMPLETO.fin : String(formData.get("hora_fin") ?? "").trim();
+
+  if (!fecha) {
+    return { error: "La fecha es obligatoria.", guardado: false };
+  }
+  if (!horaInicio || !horaFin) {
+    return { error: "Poné desde y hasta qué hora se bloquea.", guardado: false };
+  }
+  if (horaFin <= horaInicio) {
+    return { error: "La hora de fin tiene que ser posterior a la de inicio.", guardado: false };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("excepcion_disponibilidad")
+    .insert({ fecha, hora_inicio: horaInicio, hora_fin: horaFin });
+
+  if (error) {
+    return { error: error.message, guardado: false };
+  }
+
+  revalidatePath("/turnos/configuracion");
+  revalidatePath("/turnos");
+
+  // La excepción ya está guardada: los turnos que quedaron adentro no se tocan
+  // ni se cancelan, solo se informan para resolverlos a mano.
+  return {
+    error: null,
+    guardado: true,
+    fecha,
+    conflictos: await turnosEnConflicto(fecha, horaInicio, horaFin),
+  };
+}
+
+export async function eliminarExcepcion(id: string) {
+  const supabase = await createClient();
+  await supabase.from("excepcion_disponibilidad").delete().eq("id", id);
+  revalidatePath("/turnos/configuracion");
+  revalidatePath("/turnos");
 }

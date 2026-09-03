@@ -1,12 +1,19 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import type { ConfiguracionAgenda, DisponibilidadConFranjas } from "@/types/disponibilidad";
+import type {
+  ConfiguracionAgenda,
+  DisponibilidadConFranjas,
+  ExcepcionDisponibilidad,
+} from "@/types/disponibilidad";
 import { ConfiguracionForm } from "./ConfiguracionForm";
-import { guardarAgenda } from "./actions";
+import { ExcepcionesSection } from "./ExcepcionesSection";
+import { agregarExcepcion, eliminarExcepcion, guardarAgenda } from "./actions";
+import { hoyEnAR } from "@/lib/agenda";
 
 export default async function ConfiguracionAgendaPage() {
   const supabase = await createClient();
-  const [{ data: disponibilidades }, { data: configuracion }] = await Promise.all([
+  const [{ data: disponibilidades }, { data: configuracion }, { data: excepciones }] =
+    await Promise.all([
     supabase
       .from("disponibilidad")
       .select("*, franja_horaria(*)")
@@ -17,6 +24,14 @@ export default async function ConfiguracionAgendaPage() {
       .from("configuracion_agenda")
       .select("*")
       .maybeSingle<ConfiguracionAgenda>(),
+    // Solo las de hoy en adelante: una excepción vencida ya no bloquea nada.
+    supabase
+      .from("excepcion_disponibilidad")
+      .select("*")
+      .gte("fecha", hoyEnAR())
+      .order("fecha")
+      .order("hora_inicio")
+      .returns<ExcepcionDisponibilidad[]>(),
   ]);
 
   const sinConfigurar = (disponibilidades?.length ?? 0) === 0;
@@ -44,6 +59,11 @@ export default async function ConfiguracionAgendaPage() {
         action={guardarAgenda}
         disponibilidades={disponibilidades ?? []}
         configuracion={configuracion ?? null}
+      />
+      <ExcepcionesSection
+        action={agregarExcepcion}
+        eliminar={eliminarExcepcion}
+        excepciones={excepciones ?? []}
       />
     </div>
   );

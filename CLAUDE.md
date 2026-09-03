@@ -91,6 +91,17 @@ de borrarse, para no perder las franjas que tenía cargadas.
 Los tramos de atención de un día. Van en tabla aparte para soportar el día partido
 (ej. lunes de 09:00 a 11:00 y de 14:00 a 18:00).
 
+### excepcion_disponibilidad
+- id (uuid, PK)
+- fecha (date)
+- hora_inicio (time)
+- hora_fin (time — check: hora_fin > hora_inicio)
+- user_id (uuid, FK a auth.users)
+
+Fechas puntuales bloqueadas (vacaciones, feriados, un día con otro horario) sin
+tocar la disponibilidad semanal. Los bloques que caen dentro del rango no se
+ofrecen en la agenda.
+
 ### configuracion_agenda
 - id (uuid, PK)
 - duracion_bloque_minutos (int, sin default — check: > 0)

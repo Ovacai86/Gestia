@@ -1,4 +1,8 @@
-import type { DisponibilidadConFranjas, FranjaHoraria } from "@/types/disponibilidad";
+import type {
+  DisponibilidadConFranjas,
+  ExcepcionDisponibilidad,
+  FranjaHoraria,
+} from "@/types/disponibilidad";
 
 // Las fechas del calendario se manejan como "YYYY-MM-DD" en calendario
 // argentino. Para hacer aritmética se anclan a mediodía UTC: así sumar o
@@ -40,7 +44,7 @@ export function esFechaValida(fecha: string | undefined): fecha is string {
   return !!fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha) && !Number.isNaN(aDate(fecha).getTime());
 }
 
-function aMinutos(hora: string): number {
+export function aMinutos(hora: string): number {
   const [h = 0, m = 0] = hora.split(":").map(Number);
   return h * 60 + m;
 }
@@ -64,7 +68,21 @@ export type Bloque = {
   horas: number[];
 };
 
-export function generarBloques(franjas: FranjaHoraria[], duracion: number): Bloque[] {
+// Los rangos bloqueados de un día puntual. Se pasan ya filtrados por fecha:
+// generarBloques trabaja con horarios, no sabe de calendario.
+type RangoBloqueado = { hora_inicio: string; hora_fin: string };
+
+// Un bloque queda excluido si se solapa con un rango bloqueado, aunque sea
+// parcialmente: media sesión adentro de las vacaciones no sirve.
+function pisaExcepcion(inicio: number, fin: number, excepciones: RangoBloqueado[]): boolean {
+  return excepciones.some((e) => aMinutos(e.hora_inicio) < fin && inicio < aMinutos(e.hora_fin));
+}
+
+export function generarBloques(
+  franjas: FranjaHoraria[],
+  duracion: number,
+  excepciones: RangoBloqueado[] = [],
+): Bloque[] {
   if (duracion <= 0) {
     return [];
   }
@@ -80,6 +98,11 @@ export function generarBloques(franjas: FranjaHoraria[], duracion: number): Bloq
 
     for (let minuto = inicio; minuto + duracion <= fin; minuto += paso) {
       const finBloque = minuto + duracion;
+
+      if (pisaExcepcion(minuto, finBloque, excepciones)) {
+        continue;
+      }
+
       const primera = Math.floor(minuto / PASO_MINUTOS);
       // -1 para que un bloque que termina justo en punto no cuente esa hora.
       const ultima = Math.floor((finBloque - 1) / PASO_MINUTOS);
@@ -116,6 +139,7 @@ export function bloquesOfrecibles(
   fecha: string,
   disponibilidades: DisponibilidadConFranjas[],
   duracion: number,
+  excepciones: ExcepcionDisponibilidad[] = [],
 ): Bloque[] {
   if (duracion <= 0) {
     return [];
@@ -126,7 +150,7 @@ export function bloquesOfrecibles(
     return [];
   }
 
-  return generarBloques(delDia.franja_horaria ?? [], duracion);
+  return generarBloques(delDia.franja_horaria ?? [], duracion, excepcionesDe(fecha, excepciones));
 }
 
 // Si un horario puntual se puede ofrecer o no. Es el mismo criterio que
@@ -137,10 +161,20 @@ export function esHorarioOfrecible(
   hora: string,
   disponibilidades: DisponibilidadConFranjas[],
   duracion: number,
+  excepciones: ExcepcionDisponibilidad[] = [],
 ): boolean {
-  return bloquesOfrecibles(fecha, disponibilidades, duracion).some(
+  return bloquesOfrecibles(fecha, disponibilidades, duracion, excepciones).some(
     (bloque) => bloque.inicio === hora,
   );
+}
+
+// Las excepciones que aplican a una fecha. Se filtra acá para que quien llame
+// pueda traerse de una sola query las de todo el rango que está mostrando.
+export function excepcionesDe(
+  fecha: string,
+  excepciones: ExcepcionDisponibilidad[],
+): ExcepcionDisponibilidad[] {
+  return excepciones.filter((e) => e.fecha === fecha);
 }
 
 // Si un "HH:MM" cae dentro de alguna franja de ese día. A diferencia de
@@ -205,6 +239,11 @@ export function formatearRangoSemana(lunes: string, domingo: string): string {
 
 export function formatearDiaCorto(fecha: string): string {
   return formatear(fecha, { day: "numeric", month: "short" });
+}
+
+// "viernes 11 de septiembre", para listar una fecha suelta.
+export function formatearDiaLargo(fecha: string): string {
+  return formatear(fecha, { weekday: "long", day: "numeric", month: "long" });
 }
 
 export function mesDe(fecha: string): string {

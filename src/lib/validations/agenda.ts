@@ -106,3 +106,35 @@ export const agendaSchema = z
   });
 
 export type AgendaFormValues = z.infer<typeof agendaSchema>;
+
+// Una excepción puntual: un día bloqueado entero o solo un rango de horas.
+export const excepcionSchema = z
+  .object({
+    fecha: z.string().trim().min(1, "La fecha es obligatoria."),
+    dia_completo: z.boolean(),
+    hora_inicio: z.string().trim(),
+    hora_fin: z.string().trim(),
+  })
+  .superRefine((excepcion, ctx) => {
+    // Con el día completo tildado los horarios los pone el servidor.
+    if (excepcion.dia_completo) {
+      return;
+    }
+
+    if (!excepcion.hora_inicio) {
+      ctx.addIssue({ code: "custom", path: ["hora_inicio"], message: "Poné desde qué hora." });
+    }
+    if (!excepcion.hora_fin) {
+      ctx.addIssue({ code: "custom", path: ["hora_fin"], message: "Poné hasta qué hora." });
+      return;
+    }
+    if (excepcion.hora_inicio && excepcion.hora_fin <= excepcion.hora_inicio) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["hora_fin"],
+        message: "Tiene que ser posterior a la hora de inicio.",
+      });
+    }
+  });
+
+export type ExcepcionFormValues = z.infer<typeof excepcionSchema>;

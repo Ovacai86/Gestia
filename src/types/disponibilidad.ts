@@ -42,3 +42,16 @@ export type ConfiguracionAgenda = {
   duracion_bloque_minutos: number;
   user_id: string;
 };
+
+// Un rango de un día puntual en el que no se atiende, sin tocar la semana
+// recurrente: vacaciones, un feriado o un día con horario distinto. Los bloques
+// de la agenda que caen adentro dejan de ofrecerse.
+export type ExcepcionDisponibilidad = {
+  id: string;
+  // "YYYY-MM-DD", como lo devuelve Postgres para el tipo date.
+  fecha: string;
+  // "HH:MM:SS", igual que en franja_horaria.
+  hora_inicio: string;
+  hora_fin: string;
+  user_id: string;
+};
