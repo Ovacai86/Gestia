@@ -176,6 +176,9 @@ export function TurnoForm({
   const faltaMonto = !monto || Number(monto) <= 0;
   const faltaDuracion = !duracion || Number(duracion) <= 0;
   const bloqueado = faltaMonto || faltaDuracion;
+  // Cuando el monto falta porque el paciente no lo tiene cargado, el aviso de
+  // abajo ya explica qué hacer: el "El monto es obligatorio." de Zod sobra.
+  const avisoSinMonto = faltaMonto && !!pacienteElegido;
 
   // Enter no manda el formulario: con la recurrencia tildada, un Enter de más
   // creaba la serie entera sin pasar por el botón. Se permite en textarea (es
@@ -355,13 +358,13 @@ export function TurnoForm({
                   <p className="mt-1 text-xs text-gray-500">
                     Sale del monto por sesión del paciente.
                   </p>
-                  <FormMessage />
+                  {!avisoSinMonto && <FormMessage />}
                 </FormItem>
               )}
             />
           </div>
 
-          {faltaMonto && pacienteElegido && (
+          {avisoSinMonto && (
             <p className="text-sm text-destructive">
               Este paciente no tiene monto por sesión configurado. Cargalo desde su ficha antes de
               agendar un turno.{" "}
