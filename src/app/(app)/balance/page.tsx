@@ -75,6 +75,9 @@ export default async function BalancePage({
       .from("turno")
       .select("*, paciente(nombre_apellido)")
       .eq("pagado", true)
+      // Un turno cancelado no es ingreso, aunque haya quedado marcado como
+      // pagado: la seña o el cobro previo se revisan a mano.
+      .neq("estado", "cancelado")
       .gte("fecha_hora", fechaHoraDesde)
       .lt("fecha_hora", fechaHoraHasta)
       .order("fecha_hora")
