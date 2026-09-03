@@ -9,7 +9,7 @@ import {
   type KeyboardEvent,
 } from "react";
 import Link from "next/link";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { TurnoFormState } from "./actions";
 import { ResumenRecurrenciaAviso } from "./ResumenRecurrenciaAviso";
@@ -105,11 +105,13 @@ export function TurnoForm({
     },
   });
 
-  const estado = form.watch("estado");
-  const recurrente = form.watch("recurrente");
-  const pacienteId = form.watch("paciente_id");
-  const monto = form.watch("monto");
-  const duracion = form.watch("duracion_minutos");
+  // useWatch en vez de form.watch: watch() no se puede memoizar y el linter lo
+  // marca como incompatible con el compilador de React.
+  const estado = useWatch({ control: form.control, name: "estado" });
+  const recurrente = useWatch({ control: form.control, name: "recurrente" });
+  const pacienteId = useWatch({ control: form.control, name: "paciente_id" });
+  const monto = useWatch({ control: form.control, name: "monto" });
+  const duracion = useWatch({ control: form.control, name: "duracion_minutos" });
   // La recurrencia es solo del alta: editando se toca ese turno y nada más.
   const esAlta = !turno;
   // Llegó de un click en un bloque: fecha y hora ya quedaron elegidas ahí.
@@ -199,7 +201,9 @@ export function TurnoForm({
       <Form {...form}>
         {/* noValidate: la validación la maneja Zod, no el navegador. */}
         <form
-          onSubmit={form.handleSubmit(onValid)}
+          // El handler se arma dentro del evento, no en el render: onValid lee un
+          // ref y la hora actual, y eso no puede pasar mientras se renderiza.
+          onSubmit={(event) => form.handleSubmit(onValid)(event)}
           onKeyDown={bloquearEnter}
           noValidate
           className="mx-auto max-w-lg space-y-4"

@@ -17,7 +17,11 @@ import {
 // profesional decide después qué hacer con cada caso.
 export type Colision = {
   fecha: string;
+  // La del turno que se está creando.
   hora: string;
+  // La del turno que ya existía, que puede ser otra: los turnos chocan por
+  // solaparse, no por arrancar a la misma hora.
+  horaExistente: string;
   con: string;
 };
 
@@ -67,7 +71,9 @@ function readTurnoForm(formData: FormData) {
 // de fin inclusive.
 function fechasSemanales(desde: string, hasta: string): string[] {
   const fechas: string[] = [];
-  for (let f = desde; f <= hasta && fechas.length < MAX_TURNOS_RECURRENTES; f = sumarDias(f, 7)) {
+  // El corte va en MAX + 1: alcanza para detectar que se pasó del tope sin
+  // recorrer una fecha de fin lejanísima semana por semana.
+  for (let f = desde; f <= hasta && fechas.length <= MAX_TURNOS_RECURRENTES; f = sumarDias(f, 7)) {
     fechas.push(f);
   }
   return fechas;
@@ -159,7 +165,8 @@ async function generarSerieSemanal({
     if (choque) {
       colisiones.push({
         fecha,
-        hora: fechaHoraEnAR(choque.fecha_hora).hora,
+        hora,
+        horaExistente: fechaHoraEnAR(choque.fecha_hora).hora,
         con: choque.paciente?.nombre_apellido ?? "otro turno",
       });
     }
@@ -238,7 +245,7 @@ export async function crearTurno(
   }
 
   const fechas = fechasSemanales(fechaInicial, fechaFin);
-  if (fechas.length >= MAX_TURNOS_RECURRENTES) {
+  if (fechas.length > MAX_TURNOS_RECURRENTES) {
     return {
       error: `La recurrencia genera más de ${MAX_TURNOS_RECURRENTES} turnos. Acortá la fecha de fin.`,
     };
@@ -337,7 +344,7 @@ export async function repetirTurno(
   }
 
   const todas = fechasSemanales(primera, fechaFin);
-  if (todas.length >= MAX_TURNOS_RECURRENTES) {
+  if (todas.length > MAX_TURNOS_RECURRENTES) {
     return {
       error: `La recurrencia genera más de ${MAX_TURNOS_RECURRENTES} turnos. Acortá la fecha de fin.`,
     };

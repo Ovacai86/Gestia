@@ -31,7 +31,7 @@ export function ResumenRecurrenciaAviso({ resumen }: { resumen: ResumenRecurrenc
           <ul className="mt-1 space-y-0.5 text-sm text-amber-900">
             {resumen.colisiones.map((c) => (
               <li key={`${c.fecha}-${c.hora}-${c.con}`}>
-                {formatearDiaCorto(c.fecha)} — pisa a {c.con} ({c.hora})
+                {formatearDiaCorto(c.fecha)} {c.hora} — se superpone con {c.con} ({c.horaExistente})
               </li>
             ))}
           </ul>
