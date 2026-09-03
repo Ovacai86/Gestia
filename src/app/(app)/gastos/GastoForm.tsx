@@ -47,7 +47,7 @@ export function GastoForm({
   return (
     <Form {...form}>
       {/* noValidate: la validación la maneja Zod, no el navegador. */}
-      <form onSubmit={form.handleSubmit(onValid)} noValidate className="max-w-lg space-y-4">
+      <form onSubmit={form.handleSubmit(onValid)} noValidate className="mx-auto max-w-lg space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <FormField
             control={form.control}

@@ -2,7 +2,8 @@
 
 ## Qué es este proyecto
 Gestia es una app web para gestión de Centro Terapéutico. 
-Permite administrar pacientes, turnos, cobros y gastos del consultorio. 
+Permite administrar pacientes, turnos, agenda de disponibilidad, cobros y gastos
+del consultorio. 
 Es la v1/MVP, pensada para un solo profesional (sin login de paciente, sin IA, sin facturación AFIP).
 
 ## Para quién
@@ -51,7 +52,16 @@ No agregar estas features salvo que se pida explícitamente.
 - monto (numeric)
 - pagado (boolean, default false)
 - motivo_cancelacion (text, nullable — solo aplica si estado = cancelado)
+- origen (text: 'profesional' / 'paciente', default 'profesional')
+- aceptado_por_profesional (boolean, not null, sin default)
 - user_id (uuid, FK a auth.users)
+
+`origen` deja preparada el alta de turno pedida por el paciente, pero en v1 la app
+siempre inserta 'profesional': no hay portal de paciente.
+`aceptado_por_profesional` no lleva default de columna (un default no puede
+referenciar otra columna de la misma fila): lo completa el trigger
+`turno_aceptado_por_profesional_default`, que antes de cada insert lo resuelve como
+`origen = 'profesional'` cuando viene en null.
 
 ### gasto
 - id (uuid, PK)
@@ -60,6 +70,49 @@ No agregar estas features salvo que se pida explícitamente.
 - categoria (text)
 - descripcion (text, nullable)
 - user_id (uuid, FK a auth.users)
+
+### disponibilidad
+- id (uuid, PK)
+- dia_semana (int, 0 = domingo a 6 = sábado — único por usuario)
+- activo (boolean, default true)
+- user_id (uuid, FK a auth.users)
+
+Un registro por día de la semana. El día se desactiva con `activo = false` en vez
+de borrarse, para no perder las franjas que tenía cargadas.
+
+### franja_horaria
+- id (uuid, PK)
+- disponibilidad_id (uuid, FK a disponibilidad, on delete cascade)
+- hora_inicio (time)
+- hora_fin (time — check: hora_fin > hora_inicio)
+- user_id (uuid, FK a auth.users)
+
+Los tramos de atención de un día. Van en tabla aparte para soportar el día partido
+(ej. lunes de 09:00 a 11:00 y de 14:00 a 18:00).
+
+### configuracion_agenda
+- id (uuid, PK)
+- duracion_bloque_minutos (int, sin default — check: > 0)
+- user_id (uuid, FK a auth.users, unique — una sola fila por usuario)
+
+La duración del bloque es una sola para toda la agenda, no una por día. No tiene
+default a propósito: mientras no exista la fila, la duración está "sin configurar",
+el campo se muestra vacío y la agenda no ofrece ningún bloque.
+
+## Rutas
+Todo cuelga del grupo `(app)`, que exige sesión; `/login` es la única ruta pública.
+- `/` — inicio
+- `/pacientes`, `/pacientes/nuevo`, `/pacientes/[id]` — listado, alta y edición
+- `/turnos` — agenda con vista de semana y de mes, navegable por fecha
+- `/turnos/nuevo` — alta de turno, con opción de repetirlo semanalmente hasta una
+  fecha de fin (tope de 200 turnos por recurrencia)
+- `/turnos/[id]` — edición de un turno
+- `/turnos/configuracion` — disponibilidad: qué días se atiende, una o más franjas
+  horarias por día y la duración del bloque (global, en configuracion_agenda). Es la
+  pantalla que alimenta los bloques que ofrece la agenda: sin días cargados o sin
+  duración, la agenda no propone ningún horario.
+- `/gastos`, `/gastos/nuevo`, `/gastos/[id]` — listado, alta y edición
+- `/balance` — totales de ingresos y egresos
 
 ## Convenciones de código
 - Nombres de archivos y componentes en inglés, texto de la interfaz en español.

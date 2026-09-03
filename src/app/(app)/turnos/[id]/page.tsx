@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { Turno } from "@/types/turno";
 import { TurnoForm } from "../TurnoForm";
-import { actualizarTurno } from "../actions";
+import { actualizarTurno, eliminarTurno } from "../actions";
 
 export default async function EditarTurnoPage({
   params,
@@ -39,7 +39,15 @@ export default async function EditarTurnoPage({
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-semibold text-gray-900">Editar turno</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold text-gray-900">Editar turno</h1>
+        {/* El calendario reemplazó al listado, que era donde estaba Eliminar. */}
+        <form action={eliminarTurno.bind(null, id)}>
+          <button type="submit" className="text-sm text-red-600 hover:underline">
+            Eliminar
+          </button>
+        </form>
+      </div>
       <TurnoForm action={actualizarEsteTurno} pacientes={pacientes} turno={turno} />
     </div>
   );

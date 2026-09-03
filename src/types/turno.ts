@@ -1,5 +1,7 @@
 export type TurnoEstado = "programado" | "confirmado" | "realizado" | "cancelado";
 
+export type TurnoOrigen = "profesional" | "paciente";
+
 export type Turno = {
   id: string;
   paciente_id: string;
@@ -9,6 +11,8 @@ export type Turno = {
   monto: number;
   pagado: boolean;
   motivo_cancelacion: string | null;
+  origen: TurnoOrigen;
+  aceptado_por_profesional: boolean;
   user_id: string;
 };
 
