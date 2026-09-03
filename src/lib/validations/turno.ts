@@ -18,11 +18,15 @@ export const turnoSchema = z
         "La duración debe ser un número entero mayor a cero.",
       ),
     estado: z.enum(TURNO_ESTADOS),
+    // Opcional: si el paciente no tiene monto por sesión, el turno se guarda
+    // igual y el monto queda sin cargar.
     monto: z
       .string()
       .trim()
-      .min(1, "El monto es obligatorio.")
-      .refine((v) => Number.isFinite(Number(v)) && Number(v) > 0, "El monto debe ser mayor a cero."),
+      .refine(
+        (v) => v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0),
+        "El monto tiene que ser un número.",
+      ),
     pagado: z.boolean(),
     motivo_cancelacion: z.string().trim().optional(),
     // Recurrencia semanal. Solo aplica al alta: editando un turno no se toca.

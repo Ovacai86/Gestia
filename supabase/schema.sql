@@ -26,7 +26,9 @@ create table if not exists turno (
   fecha_hora timestamptz not null,
   duracion_minutos int not null default 50,
   estado turno_estado not null default 'programado',
-  monto numeric(10, 2) not null default 0,
+  -- Sin monto es null, no cero: el paciente puede no tener monto por sesión
+  -- definido. El balance trata el null como cero al sumar.
+  monto numeric(10, 2),
   pagado boolean not null default false,
   motivo_cancelacion text,
   -- Quién originó el turno. Hoy siempre 'profesional'; queda lista para
@@ -408,3 +410,11 @@ create policy "excepcion_disponibilidad_select_own" on excepcion_disponibilidad 
 create policy "excepcion_disponibilidad_insert_own" on excepcion_disponibilidad for insert with check (user_id = auth.uid());
 create policy "excepcion_disponibilidad_update_own" on excepcion_disponibilidad for update using (user_id = auth.uid()) with check (user_id = auth.uid());
 create policy "excepcion_disponibilidad_delete_own" on excepcion_disponibilidad for delete using (user_id = auth.uid());
+
+-- Migración: el monto del turno deja de ser obligatorio.
+-- Un turno de un paciente sin monto por sesión se guarda con monto null en vez
+-- de bloquearse. No se toca ningún valor ya cargado.
+-- Este bloque es idempotente: se puede correr desde acá hasta el final.
+
+alter table turno alter column monto drop not null;
+alter table turno alter column monto drop default;

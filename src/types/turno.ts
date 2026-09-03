@@ -8,7 +8,8 @@ export type Turno = {
   fecha_hora: string;
   duracion_minutos: number;
   estado: TurnoEstado;
-  monto: number;
+  // Puede quedar sin cargar: el paciente no tiene monto por sesión definido.
+  monto: number | null;
   pagado: boolean;
   motivo_cancelacion: string | null;
   origen: TurnoOrigen;

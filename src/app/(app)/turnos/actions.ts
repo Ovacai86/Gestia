@@ -51,7 +51,7 @@ const MAX_TURNOS_RECURRENTES = 200;
 // dependa de en qué timezone corra el servidor (Vercel usa UTC).
 function readTurnoForm(formData: FormData) {
   const fechaHoraLocal = String(formData.get("fecha_hora") ?? "");
-  const monto = Number(formData.get("monto") ?? 0);
+  const montoCrudo = String(formData.get("monto") ?? "").trim();
   const duracion = Number(formData.get("duracion_minutos") ?? 50);
   const estado = String(formData.get("estado") ?? "programado") as TurnoEstado;
   const motivoCancelacion = String(formData.get("motivo_cancelacion") ?? "").trim();
@@ -61,7 +61,9 @@ function readTurnoForm(formData: FormData) {
     fecha_hora: fechaHoraLocal ? new Date(`${fechaHoraLocal}:00-03:00`).toISOString() : null,
     duracion_minutos: Number.isFinite(duracion) && duracion > 0 ? duracion : 50,
     estado,
-    monto: Number.isFinite(monto) ? monto : 0,
+    // Sin monto se guarda null, no cero: son cosas distintas, y el balance
+    // trata el null como cero al sumar.
+    monto: montoCrudo && Number.isFinite(Number(montoCrudo)) ? Number(montoCrudo) : null,
     pagado: formData.get("pagado") === "on",
     motivo_cancelacion: estado === "cancelado" && motivoCancelacion ? motivoCancelacion : null,
   };
@@ -91,7 +93,7 @@ type BaseSerie = {
   paciente_id: string;
   duracion_minutos: number;
   estado: TurnoEstado;
-  monto: number;
+  monto: number | null;
   pagado: boolean;
   motivo_cancelacion: string | null;
 };
@@ -207,14 +209,6 @@ export async function crearTurno(
   if (!data.fecha_hora) {
     return { error: "La fecha y hora son obligatorias." };
   }
-  // El monto lo pone el paciente y el campo es de solo lectura: si llega en
-  // cero es porque ese paciente todavía no tiene monto por sesión.
-  if (!(data.monto > 0)) {
-    return {
-      error:
-        "Este paciente no tiene monto por sesión configurado. Cargalo desde su ficha antes de agendar un turno.",
-    };
-  }
 
   const supabase = await createClient();
 
@@ -286,14 +280,6 @@ export async function actualizarTurno(
   }
   if (!data.fecha_hora) {
     return { error: "La fecha y hora son obligatorias." };
-  }
-  // El monto lo pone el paciente y el campo es de solo lectura: si llega en
-  // cero es porque ese paciente todavía no tiene monto por sesión.
-  if (!(data.monto > 0)) {
-    return {
-      error:
-        "Este paciente no tiene monto por sesión configurado. Cargalo desde su ficha antes de agendar un turno.",
-    };
   }
 
   const supabase = await createClient();

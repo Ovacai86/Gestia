@@ -97,7 +97,7 @@ export function TurnoForm({
           ? String(duracionBloque)
           : "",
       estado: turno?.estado ?? "programado",
-      monto: turno ? String(turno.monto) : "",
+      monto: turno?.monto != null ? String(turno.monto) : "",
       pagado: turno?.pagado ?? false,
       motivo_cancelacion: turno?.motivo_cancelacion ?? "",
       recurrente: false,
@@ -110,22 +110,16 @@ export function TurnoForm({
   const estado = useWatch({ control: form.control, name: "estado" });
   const recurrente = useWatch({ control: form.control, name: "recurrente" });
   const pacienteId = useWatch({ control: form.control, name: "paciente_id" });
-  const monto = useWatch({ control: form.control, name: "monto" });
   const duracion = useWatch({ control: form.control, name: "duracion_minutos" });
   // La recurrencia es solo del alta: editando se toca ese turno y nada más.
   const esAlta = !turno;
   // Llegó de un click en un bloque: fecha y hora ya quedaron elegidas ahí.
   const desdeBloque = esAlta && !!fechaHoraInicial;
 
-  const pacienteElegido = pacientes.find((p) => p.id === pacienteId);
-  // Monto y duración son de solo lectura: si están vacíos es porque falta el
-  // dato de origen, y guardar así dejaría un turno en cero.
-  const faltaMonto = !monto || Number(monto) <= 0;
+  // El monto puede quedar vacío: si el paciente no tiene monto por sesión, el
+  // turno se guarda igual y la fila queda con monto null.
   const faltaDuracion = !duracion || Number(duracion) <= 0;
-  const bloqueado = faltaMonto || faltaDuracion;
-  // Cuando el monto falta porque el paciente no lo tiene cargado, el aviso de
-  // abajo ya explica qué hacer: el "El monto es obligatorio." de Zod sobra.
-  const avisoSinMonto = faltaMonto && !!pacienteElegido;
+  const bloqueado = faltaDuracion;
 
   // Enter no manda el formulario: con la recurrencia tildada, un Enter de más
   // creaba la serie entera sin pasar por el botón. Se permite en textarea (es
@@ -302,26 +296,16 @@ export function TurnoForm({
               name="monto"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Monto *</FormLabel>
+                  <FormLabel>Monto</FormLabel>
                   <Input {...field} readOnly className="bg-gray-50 text-gray-600" />
                   <p className="mt-1 text-xs text-gray-500">
-                    Sale del monto por sesión del paciente.
+                    Sale del monto por sesión del paciente. Queda vacío si no lo tiene cargado.
                   </p>
-                  {!avisoSinMonto && <FormMessage />}
+                  <FormMessage />
                 </FormItem>
               )}
             />
           </div>
-
-          {avisoSinMonto && (
-            <p className="text-sm text-destructive">
-              Este paciente no tiene monto por sesión configurado. Cargalo desde su ficha antes de
-              agendar un turno.{" "}
-              <Link href={`/pacientes/${pacienteElegido.id}`} className="underline">
-                Ir a la ficha de {pacienteElegido.nombre_apellido}
-              </Link>
-            </p>
-          )}
 
           {faltaDuracion && esAlta && (
             <p className="text-sm text-destructive">

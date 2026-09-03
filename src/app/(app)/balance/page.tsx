@@ -23,8 +23,8 @@ const currency = new Intl.NumberFormat("es-AR", {
   maximumFractionDigits: 0,
 });
 
-function formatMonto(monto: number) {
-  return currency.format(monto);
+function formatMonto(monto: number | null) {
+  return currency.format(monto ?? 0);
 }
 
 // El período se define en calendario AR (-03:00), no en la timezone del
@@ -93,7 +93,8 @@ export default async function BalancePage({
 
   const listaTurnos = turnos ?? [];
   const listaGastos = gastos ?? [];
-  const ingresos = listaTurnos.reduce((acc, t) => acc + t.monto, 0);
+  // monto puede ser null (turno sin monto cargado): ahí suma cero.
+  const ingresos = listaTurnos.reduce((acc, t) => acc + (t.monto ?? 0), 0);
   const egresos = listaGastos.reduce((acc, g) => acc + g.monto, 0);
 
   const anios = Array.from({ length: 6 }, (_, i) => defecto.anio - 4 + i);
