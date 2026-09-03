@@ -26,8 +26,16 @@ export default async function EditarTurnoPage({
   // Incluimos el paciente actual del turno aunque esté inactivo, para no
   // perder la selección al editar (si no, el <select> cae en otra opción).
   const [{ data: activos }, { data: pacienteActual }] = await Promise.all([
-    supabase.from("paciente").select("id, nombre_apellido").eq("activo", true).order("nombre_apellido"),
-    supabase.from("paciente").select("id, nombre_apellido").eq("id", turno.paciente_id).maybeSingle(),
+    supabase
+      .from("paciente")
+      .select("id, nombre_apellido, monto_fijo")
+      .eq("activo", true)
+      .order("nombre_apellido"),
+    supabase
+      .from("paciente")
+      .select("id, nombre_apellido, monto_fijo")
+      .eq("id", turno.paciente_id)
+      .maybeSingle(),
   ]);
 
   const pacientes =

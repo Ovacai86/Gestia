@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import type { ConfiguracionAgenda } from "@/types/disponibilidad";
 import { TurnoForm } from "../TurnoForm";
 import { crearTurno } from "../actions";
 
@@ -11,19 +12,21 @@ export default async function NuevoTurnoPage({
 }: {
   searchParams: Promise<{ fecha_hora?: string; duracion?: string }>;
 }) {
-  const { fecha_hora, duracion } = await searchParams;
+  const { fecha_hora } = await searchParams;
 
   const fechaHoraInicial = fecha_hora && FECHA_HORA_RE.test(fecha_hora) ? fecha_hora : undefined;
-  const duracionNumero = Number(duracion);
-  const duracionInicial =
-    Number.isInteger(duracionNumero) && duracionNumero > 0 ? String(duracionNumero) : undefined;
 
   const supabase = await createClient();
-  const { data: pacientes } = await supabase
-    .from("paciente")
-    .select("id, nombre_apellido")
-    .eq("activo", true)
-    .order("nombre_apellido");
+  // La duración no sale del querystring: es una sola para toda la agenda y el
+  // formulario la muestra de solo lectura.
+  const [{ data: pacientes }, { data: configuracion }] = await Promise.all([
+    supabase
+      .from("paciente")
+      .select("id, nombre_apellido, monto_fijo")
+      .eq("activo", true)
+      .order("nombre_apellido"),
+    supabase.from("configuracion_agenda").select("*").maybeSingle<ConfiguracionAgenda>(),
+  ]);
 
   return (
     <div>
@@ -32,7 +35,7 @@ export default async function NuevoTurnoPage({
         action={crearTurno}
         pacientes={pacientes ?? []}
         fechaHoraInicial={fechaHoraInicial}
-        duracionInicial={duracionInicial}
+        duracionBloque={configuracion?.duracion_bloque_minutos ?? null}
       />
     </div>
   );

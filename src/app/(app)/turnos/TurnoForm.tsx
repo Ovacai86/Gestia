@@ -1,6 +1,13 @@
 "use client";
 
-import { startTransition, useActionState, useRef, useState } from "react";
+import {
+  startTransition,
+  useActionState,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -26,7 +33,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Form, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 
-type PacienteOption = { id: string; nombre_apellido: string };
+type PacienteOption = { id: string; nombre_apellido: string; monto_fijo: number | null };
 
 // Los turnos de la serie se crean siempre; esto es el parte de lo que quedó
 // pisado o fuera de horario, para que el profesional revise esos casos.
@@ -111,7 +118,7 @@ export function TurnoForm({
   pacientes,
   turno,
   fechaHoraInicial,
-  duracionInicial,
+  duracionBloque,
 }: {
   action: (state: TurnoFormState, formData: FormData) => Promise<TurnoFormState>;
   pacientes: PacienteOption[];
@@ -119,18 +126,31 @@ export function TurnoForm({
   // Precarga al llegar desde un bloque libre del calendario. Solo aplica al
   // alta: editando manda siempre lo que ya tiene el turno.
   fechaHoraInicial?: string;
-  duracionInicial?: string;
+  // La duración global de configuracion_agenda. Null si todavía no se configuró.
+  duracionBloque?: number | null;
 }) {
   const [state, formAction, pending] = useActionState(action, { error: null });
   const [pastDateOpen, setPastDateOpen] = useState(false);
   const pendingValuesRef = useRef<TurnoFormValues | null>(null);
 
+  const [fechaInicial, horaInicial] = fechaHoraInicial
+    ? [fechaHoraInicial.slice(0, 10), fechaHoraInicial.slice(11, 16)]
+    : ["", ""];
+  const fechaHoraDelTurno = turno ? toDatetimeLocalValue(turno.fecha_hora) : "";
+
   const form = useForm<TurnoFormValues>({
     resolver: zodResolver(turnoSchema),
     defaultValues: {
       paciente_id: turno?.paciente_id ?? "",
-      fecha_hora: turno ? toDatetimeLocalValue(turno.fecha_hora) : (fechaHoraInicial ?? ""),
-      duracion_minutos: turno ? String(turno.duracion_minutos) : (duracionInicial ?? "50"),
+      fecha: turno ? fechaHoraDelTurno.slice(0, 10) : fechaInicial,
+      hora: turno ? fechaHoraDelTurno.slice(11, 16) : horaInicial,
+      // Editando manda la duración con la que se creó el turno, no la global:
+      // cambiar la configuración no debería reescribir turnos ya agendados.
+      duracion_minutos: turno
+        ? String(turno.duracion_minutos)
+        : duracionBloque != null
+          ? String(duracionBloque)
+          : "",
       estado: turno?.estado ?? "programado",
       monto: turno ? String(turno.monto) : "",
       pagado: turno?.pagado ?? false,
@@ -142,13 +162,55 @@ export function TurnoForm({
 
   const estado = form.watch("estado");
   const recurrente = form.watch("recurrente");
+  const pacienteId = form.watch("paciente_id");
+  const monto = form.watch("monto");
+  const duracion = form.watch("duracion_minutos");
   // La recurrencia es solo del alta: editando se toca ese turno y nada más.
   const esAlta = !turno;
+  // Llegó de un click en un bloque: fecha y hora ya quedaron elegidas ahí.
+  const desdeBloque = esAlta && !!fechaHoraInicial;
+
+  const pacienteElegido = pacientes.find((p) => p.id === pacienteId);
+  // Monto y duración son de solo lectura: si están vacíos es porque falta el
+  // dato de origen, y guardar así dejaría un turno en cero.
+  const faltaMonto = !monto || Number(monto) <= 0;
+  const faltaDuracion = !duracion || Number(duracion) <= 0;
+  const bloqueado = faltaMonto || faltaDuracion;
+
+  // Enter no manda el formulario: con la recurrencia tildada, un Enter de más
+  // creaba la serie entera sin pasar por el botón. Se permite en textarea (es
+  // un salto de línea) y en botones (ahí Enter es activar el botón, no un
+  // submit implícito).
+  function bloquearEnter(event: KeyboardEvent<HTMLFormElement>) {
+    const etiqueta = (event.target as HTMLElement).tagName;
+    if (event.key === "Enter" && etiqueta !== "TEXTAREA" && etiqueta !== "BUTTON") {
+      event.preventDefault();
+    }
+  }
+
+  // El monto sale del paciente, pero solo cuando se elige uno distinto del que
+  // ya tenía el turno: editando, el monto con el que se creó no se pisa aunque
+  // después haya cambiado el monto_fijo de la ficha.
+  const pacienteSincronizado = useRef(turno?.paciente_id ?? "");
+
+  useEffect(() => {
+    if (pacienteId === pacienteSincronizado.current) {
+      return;
+    }
+
+    pacienteSincronizado.current = pacienteId;
+    const elegido = pacientes.find((p) => p.id === pacienteId);
+    form.setValue("monto", elegido?.monto_fijo != null ? String(elegido.monto_fijo) : "", {
+      shouldValidate: true,
+    });
+  }, [pacienteId, pacientes, form]);
 
   function submitValues(values: TurnoFormValues) {
     const formData = new FormData();
     formData.set("paciente_id", values.paciente_id);
-    formData.set("fecha_hora", values.fecha_hora);
+    // El server sigue recibiendo un solo campo "YYYY-MM-DDTHH:MM": la división
+    // en dos inputs es de la UI, no del contrato con la acción.
+    formData.set("fecha_hora", `${values.fecha}T${values.hora}`);
     formData.set("duracion_minutos", values.duracion_minutos);
     formData.set("estado", values.estado);
     formData.set("monto", values.monto);
@@ -167,7 +229,7 @@ export function TurnoForm({
   }
 
   function onValid(values: TurnoFormValues) {
-    const fechaHoraDate = new Date(`${values.fecha_hora}:00-03:00`);
+    const fechaHoraDate = new Date(`${values.fecha}T${values.hora}:00-03:00`);
     if (fechaHoraDate.getTime() < Date.now()) {
       pendingValuesRef.current = values;
       setPastDateOpen(true);
@@ -188,7 +250,12 @@ export function TurnoForm({
     <>
       <Form {...form}>
         {/* noValidate: la validación la maneja Zod, no el navegador. */}
-        <form onSubmit={form.handleSubmit(onValid)} noValidate className="mx-auto max-w-lg space-y-4">
+        <form
+          onSubmit={form.handleSubmit(onValid)}
+          onKeyDown={bloquearEnter}
+          noValidate
+          className="mx-auto max-w-lg space-y-4"
+        >
           <FormField
             control={form.control}
             name="paciente_id"
@@ -222,14 +289,16 @@ export function TurnoForm({
           <div className="grid grid-cols-2 gap-4">
             <FormField
               control={form.control}
-              name="fecha_hora"
+              name="fecha"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Fecha y hora *</FormLabel>
+                  <FormLabel>Fecha *</FormLabel>
                   <Input
                     {...field}
-                    type="datetime-local"
-                    aria-invalid={!!form.formState.errors.fecha_hora}
+                    type="date"
+                    readOnly={desdeBloque}
+                    className={desdeBloque ? "bg-gray-50 text-gray-600" : undefined}
+                    aria-invalid={!!form.formState.errors.fecha}
                   />
                   <FormMessage />
                 </FormItem>
@@ -237,21 +306,80 @@ export function TurnoForm({
             />
             <FormField
               control={form.control}
-              name="duracion_minutos"
+              name="hora"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Duración (min)</FormLabel>
+                  <FormLabel>Hora *</FormLabel>
                   <Input
                     {...field}
-                    type="number"
-                    min={0}
-                    aria-invalid={!!form.formState.errors.duracion_minutos}
+                    type="time"
+                    readOnly={desdeBloque}
+                    className={desdeBloque ? "bg-gray-50 text-gray-600" : undefined}
+                    aria-invalid={!!form.formState.errors.hora}
                   />
                   <FormMessage />
                 </FormItem>
               )}
             />
           </div>
+
+          {desdeBloque && (
+            <p className="text-xs text-gray-500">
+              La fecha y la hora salen del bloque que elegiste en el calendario. Para cambiarlas,
+              volvé y elegí otro bloque.
+            </p>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <FormField
+              control={form.control}
+              name="duracion_minutos"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Duración (min)</FormLabel>
+                  <Input {...field} readOnly className="bg-gray-50 text-gray-600" />
+                  <p className="mt-1 text-xs text-gray-500">
+                    {esAlta ? "Definida en tu disponibilidad." : "La que tenía el turno."}
+                  </p>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="monto"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Monto *</FormLabel>
+                  <Input {...field} readOnly className="bg-gray-50 text-gray-600" />
+                  <p className="mt-1 text-xs text-gray-500">
+                    Sale del monto por sesión del paciente.
+                  </p>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+
+          {faltaMonto && pacienteElegido && (
+            <p className="text-sm text-destructive">
+              Este paciente no tiene monto por sesión configurado. Cargalo desde su ficha antes de
+              agendar un turno.{" "}
+              <Link href={`/pacientes/${pacienteElegido.id}`} className="underline">
+                Ir a la ficha de {pacienteElegido.nombre_apellido}
+              </Link>
+            </p>
+          )}
+
+          {faltaDuracion && esAlta && (
+            <p className="text-sm text-destructive">
+              Todavía no configuraste la duración del bloque.{" "}
+              <Link href="/turnos/configuracion" className="underline">
+                Cargala en tu disponibilidad
+              </Link>{" "}
+              antes de agendar un turno.
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <FormField
@@ -276,23 +404,6 @@ export function TurnoForm({
                       ))}
                     </SelectContent>
                   </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="monto"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Monto *</FormLabel>
-                  <Input
-                    {...field}
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    aria-invalid={!!form.formState.errors.monto}
-                  />
                   <FormMessage />
                 </FormItem>
               )}
@@ -366,9 +477,17 @@ export function TurnoForm({
 
           {state.resumen && <ResumenRecurrenciaAviso resumen={state.resumen} />}
 
-          <Button type="submit" disabled={pending}>
-            {pending ? "Guardando…" : "Guardar"}
-          </Button>
+          {/* Con el resumen a la vista la serie ya se creó: reenviar el mismo
+              formulario la duplicaría, así que el botón queda deshabilitado y
+              la salida es el link al calendario. */}
+          <div className="flex items-center gap-4">
+            <Button type="submit" disabled={pending || !!state.resumen || bloqueado}>
+              {pending ? "Guardando…" : "Guardar"}
+            </Button>
+            <Link href="/turnos" className="text-sm text-gray-600 hover:text-gray-900">
+              Volver a turnos
+            </Link>
+          </div>
         </form>
       </Form>
 

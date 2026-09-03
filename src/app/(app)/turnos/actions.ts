@@ -88,6 +88,14 @@ export async function crearTurno(
   if (!data.fecha_hora) {
     return { error: "La fecha y hora son obligatorias." };
   }
+  // El monto lo pone el paciente y el campo es de solo lectura: si llega en
+  // cero es porque ese paciente todavía no tiene monto por sesión.
+  if (!(data.monto > 0)) {
+    return {
+      error:
+        "Este paciente no tiene monto por sesión configurado. Cargalo desde su ficha antes de agendar un turno.",
+    };
+  }
 
   const supabase = await createClient();
 
@@ -183,9 +191,10 @@ export async function crearTurno(
     return { error: error.message };
   }
 
-  revalidatePath("/turnos");
-
   // Con algo para avisar no se redirige: el resumen se muestra en el form.
+  // Acá no se revalida /turnos a propósito: al quedarse en el formulario, el
+  // refresh del router deja la pestaña trabada un rato largo. El calendario es
+  // una ruta dinámica, así que se vuelve a pedir al servidor cuando se navega.
   if (colisiones.length > 0 || fueraDeHorario.length > 0) {
     return {
       error: null,
@@ -199,6 +208,7 @@ export async function crearTurno(
     };
   }
 
+  revalidatePath("/turnos");
   redirect("/turnos");
 }
 
@@ -214,6 +224,14 @@ export async function actualizarTurno(
   }
   if (!data.fecha_hora) {
     return { error: "La fecha y hora son obligatorias." };
+  }
+  // El monto lo pone el paciente y el campo es de solo lectura: si llega en
+  // cero es porque ese paciente todavía no tiene monto por sesión.
+  if (!(data.monto > 0)) {
+    return {
+      error:
+        "Este paciente no tiene monto por sesión configurado. Cargalo desde su ficha antes de agendar un turno.",
+    };
   }
 
   const supabase = await createClient();

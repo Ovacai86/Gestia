@@ -5,7 +5,10 @@ export const TURNO_ESTADOS = ["programado", "confirmado", "realizado", "cancelad
 export const turnoSchema = z
   .object({
     paciente_id: z.string().trim().min(1, "Elegí un paciente."),
-    fecha_hora: z.string().trim().min(1, "La fecha y hora son obligatorias."),
+    // Fecha y hora van separadas: el calendario precarga las dos cuando el alta
+    // sale de un bloque, y así cada una muestra su propio error.
+    fecha: z.string().trim().min(1, "La fecha es obligatoria."),
+    hora: z.string().trim().min(1, "La hora es obligatoria."),
     duracion_minutos: z
       .string()
       .trim()
@@ -40,10 +43,8 @@ export const turnoSchema = z
       return;
     }
 
-    // fecha_hora llega como "YYYY-MM-DDTHH:MM" y la fecha de fin como
-    // "YYYY-MM-DD": alcanza con comparar los primeros 10 caracteres.
-    const fechaInicial = turno.fecha_hora.slice(0, 10);
-    if (turno.fecha_fin_recurrencia < fechaInicial) {
+    // Las dos son "YYYY-MM-DD": se comparan como string sin parsear.
+    if (turno.fecha_fin_recurrencia < turno.fecha) {
       ctx.addIssue({
         code: "custom",
         path: ["fecha_fin_recurrencia"],
