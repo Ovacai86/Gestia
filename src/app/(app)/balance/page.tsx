@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { fechaHoraEnAR, formatearRangoSemana, semanasDelMes } from "@/lib/agenda";
 import type { Gasto } from "@/types/gasto";
 import type { TurnoConPaciente } from "@/types/turno";
 
@@ -50,9 +51,14 @@ function pad(n: number) {
 export default async function BalancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ mes?: string; anio?: string }>;
+  searchParams: Promise<{ mes?: string; anio?: string; paciente?: string; semana?: string }>;
 }) {
-  const { mes: mesParam, anio: anioParam } = await searchParams;
+  const {
+    mes: mesParam,
+    anio: anioParam,
+    paciente: pacienteParam,
+    semana: semanaParam,
+  } = await searchParams;
   const defecto = hoyEnAR();
 
   const mesNum = Number(mesParam);
@@ -70,7 +76,7 @@ export default async function BalancePage({
   const fechaHasta = `${anioSiguiente}-${pad(mesSiguiente)}-01`;
 
   const supabase = await createClient();
-  const [{ data: turnos }, { data: gastos }] = await Promise.all([
+  const [{ data: turnos }, { data: gastos }, { data: realizados }] = await Promise.all([
     supabase
       .from("turno")
       .select("*, paciente(nombre_apellido)")
@@ -89,6 +95,16 @@ export default async function BalancePage({
       .lt("fecha", fechaHasta)
       .order("fecha")
       .returns<Gasto[]>(),
+    // El detalle de sesiones no mira el cobro: lista lo que se atendió. Es a
+    // propósito distinto del total de ingresos, que suma por pagado.
+    supabase
+      .from("turno")
+      .select("*, paciente(nombre_apellido)")
+      .eq("estado", "realizado")
+      .gte("fecha_hora", fechaHoraDesde)
+      .lt("fecha_hora", fechaHoraHasta)
+      .order("fecha_hora")
+      .returns<TurnoConPaciente[]>(),
   ]);
 
   const listaTurnos = turnos ?? [];
@@ -98,6 +114,47 @@ export default async function BalancePage({
   const egresos = listaGastos.reduce((acc, g) => acc + g.monto, 0);
 
   const anios = Array.from({ length: 6 }, (_, i) => defecto.anio - 4 + i);
+
+  const sesiones = realizados ?? [];
+
+  // Solo los pacientes que tienen alguna sesión en el período: un selector con
+  // pacientes sin sesiones solo ofrecería filtros que no devuelven nada.
+  const pacientesConSesiones = Array.from(
+    new Map(
+      sesiones
+        .filter((t) => t.paciente)
+        .map((t) => [t.paciente_id, t.paciente!.nombre_apellido]),
+    ),
+  ).sort((a, b) => a[1].localeCompare(b[1]));
+
+  // Las semanas que cubren el mes ya elegido arriba: el filtro acota adentro de
+  // ese mes, no es un rango de fechas independiente.
+  const semanas = semanasDelMes(fechaDesde).map((dias) => ({
+    lunes: dias[0],
+    domingo: dias[dias.length - 1],
+  }));
+
+  const pacienteFiltro = pacientesConSesiones.some(([id]) => id === pacienteParam)
+    ? pacienteParam
+    : undefined;
+  const semanaFiltro = semanas.some((s) => s.lunes === semanaParam) ? semanaParam : undefined;
+  const semanaElegida = semanas.find((s) => s.lunes === semanaFiltro);
+
+  const sesionesFiltradas = sesiones.filter((turno) => {
+    if (pacienteFiltro && turno.paciente_id !== pacienteFiltro) {
+      return false;
+    }
+    if (semanaElegida) {
+      const { fecha } = fechaHoraEnAR(turno.fecha_hora);
+      return fecha >= semanaElegida.lunes && fecha <= semanaElegida.domingo;
+    }
+    return true;
+  });
+
+  const hayFiltros = !!pacienteFiltro || !!semanaFiltro;
+  // Ojo: esto no es el total de ingresos de arriba. Suma lo realizado según los
+  // filtros, cobrado o no; el de arriba suma lo cobrado de todo el mes.
+  const subtotalFiltrado = sesionesFiltradas.reduce((acc, t) => acc + (t.monto ?? 0), 0);
 
   return (
     <div>
@@ -148,9 +205,56 @@ export default async function BalancePage({
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
         <div>
-          <h2 className="mb-2 text-sm font-medium text-gray-700">Turnos pagados</h2>
-          {listaTurnos.length === 0 ? (
-            <p className="text-gray-500">Sin ingresos registrados en este período.</p>
+          <h2 className="mb-2 text-sm font-medium text-gray-700">Sesiones realizadas</h2>
+
+          {/* Los filtros viajan por querystring junto al período ya elegido, así
+              que el mes y el año van como hidden para no perderlos. */}
+          <form className="mb-3 flex flex-wrap items-center gap-2" method="get">
+            <input type="hidden" name="mes" value={mes} />
+            <input type="hidden" name="anio" value={anio} />
+            <select
+              name="paciente"
+              defaultValue={pacienteFiltro ?? ""}
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+            >
+              <option value="">Todos los pacientes</option>
+              {pacientesConSesiones.map(([id, nombre]) => (
+                <option key={id} value={id}>
+                  {nombre}
+                </option>
+              ))}
+            </select>
+            <select
+              name="semana"
+              defaultValue={semanaFiltro ?? ""}
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
+            >
+              <option value="">Todo el mes</option>
+              {semanas.map((semana) => (
+                <option key={semana.lunes} value={semana.lunes}>
+                  {formatearRangoSemana(semana.lunes, semana.domingo)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Filtrar
+            </button>
+          </form>
+
+          {sesionesFiltradas.length === 0 ? (
+            <>
+              <p className="text-gray-500">
+                {hayFiltros
+                  ? "No hay sesiones realizadas con estos filtros."
+                  : "Sin sesiones realizadas en este período."}
+              </p>
+              <p className="mt-2 text-sm text-gray-700">
+                Subtotal filtrado: <span className="font-medium">{formatMonto(0)}</span>
+              </p>
+            </>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
               <table className="w-full text-sm">
@@ -162,17 +266,37 @@ export default async function BalancePage({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {listaTurnos.map((turno) => (
+                  {sesionesFiltradas.map((turno) => (
                     <tr key={turno.id}>
                       <td className="px-4 py-2 text-gray-600">
                         {new Date(turno.fecha_hora).toLocaleDateString("es-AR", { dateStyle: "short" })}
                       </td>
                       <td className="px-4 py-2 text-gray-900">{turno.paciente?.nombre_apellido ?? "—"}</td>
-                      <td className="px-4 py-2 text-gray-600">{formatMonto(turno.monto)}</td>
+                      <td className="px-4 py-2 text-gray-600">
+                        {formatMonto(turno.monto)}
+                        {!turno.pagado && (
+                          <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
+                            Sin cobrar
+                          </span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {sesionesFiltradas.length > 0 && (
+            <div className="mt-2">
+              <p className="text-sm text-gray-700">
+                Subtotal filtrado:{" "}
+                <span className="font-medium">{formatMonto(subtotalFiltrado)}</span>
+              </p>
+              <p className="mt-0.5 text-xs text-gray-500">
+                Suma lo realizado según estos filtros, cobrado o no. No es el total de ingresos de
+                arriba, que cuenta lo cobrado de todo el mes.
+              </p>
             </div>
           )}
         </div>
