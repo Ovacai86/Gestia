@@ -56,6 +56,7 @@ la restricción es de UX, no de schema.
 - monto (numeric, nullable — sin default)
 - pagado (boolean, default false)
 - motivo_cancelacion (text, nullable — solo aplica si estado = cancelado)
+- modalidad (text: 'presencial' / 'virtual', default 'virtual' — check en la base)
 - origen (text: 'profesional' / 'paciente', default 'profesional')
 - aceptado_por_profesional (boolean, not null, sin default)
 - user_id (uuid, FK a auth.users)
@@ -78,9 +79,16 @@ una devolución. El formulario deshabilita el check y lo destilda solo al cambia
 un estado que no lo admite; `crearTurno` y `actualizarTurno` rechazan el guardado
 igual, por si llega salteando el form. La restricción es de app, no de schema.
 
-En el alta con recurrencia, el `pagado` del formulario vale solo para el turno base
-(la primera fecha, el que el profesional está cargando): las repeticiones se crean
-siempre con `pagado = false`.
+Toda repetición semanal —la del alta y la de "repetir desde este turno"— nace con
+`pagado = false` y con el `monto_fijo` de la ficha del paciente, nunca con un monto
+de excepción: esa vale para el turno que la tiene cargada y nada más. En el alta,
+el `pagado` y el `monto` del formulario aplican solo al turno base (la primera
+fecha). La `modalidad` sí se hereda a toda la serie.
+
+El monto del turno se puede editar a mano con el check "Excepción" que hay al lado
+del campo, tanto en el alta como en la edición. Vale para ese turno solo: no toca el
+`monto_fijo` del paciente ni otros turnos. Cero es válido (una sesión sin cargo);
+negativo lo rechazan el schema de Zod y las server actions.
 
 ### gasto
 - id (uuid, PK)
@@ -138,10 +146,13 @@ Todo cuelga del grupo `(app)`, que exige sesión; `/login` es la única ruta pú
 - `/pacientes`, `/pacientes/nuevo`, `/pacientes/[id]` — listado, alta y edición
 - `/turnos` — agenda con vista de semana y de mes, navegable por fecha
 - `/turnos/nuevo` — alta de turno, con opción de repetirlo semanalmente hasta una
-  fecha de fin (tope de 200 turnos por recurrencia)
+  fecha de fin (tope de 200 turnos por recurrencia). Entrando derecho (no desde un
+  bloque del calendario) precarga fecha y hora con el primer bloque libre de ahora
+  en adelante (`primerBloqueLibre` en `src/lib/agenda.ts`), y los campos quedan
+  editables; llegando desde un bloque quedan de solo lectura
 - `/turnos/[id]` — edición de un turno, y desde ahí se puede repetir semanalmente
   hacia adelante: crea las semanas siguientes con el mismo día, horario, paciente,
-  duración y monto, sin tocar ni duplicar el original. Si el turno pertenece a una
+  duración y modalidad, sin tocar ni duplicar el original. Si el turno pertenece a una
   serie también se puede cancelar en bloque, al estilo Outlook: solo este turno,
   este y los siguientes, o toda la serie (ver "Series de turnos")
 - `/turnos/configuracion` — disponibilidad: qué días se atiende, una o más franjas

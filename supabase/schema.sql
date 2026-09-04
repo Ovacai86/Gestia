@@ -31,6 +31,9 @@ create table if not exists turno (
   monto numeric(10, 2),
   pagado boolean not null default false,
   motivo_cancelacion text,
+  -- Presencial o virtual. Los turnos nuevos nacen virtuales.
+  modalidad text not null default 'virtual'
+    constraint turno_modalidad_check check (modalidad in ('presencial', 'virtual')),
   -- Quién originó el turno. Hoy siempre 'profesional'; queda lista para
   -- cuando el paciente pueda pedir turno por su cuenta.
   origen text not null default 'profesional'
@@ -418,3 +421,16 @@ create policy "excepcion_disponibilidad_delete_own" on excepcion_disponibilidad 
 
 alter table turno alter column monto drop not null;
 alter table turno alter column monto drop default;
+
+-- Migración: modalidad del turno (presencial / virtual).
+-- Los turnos que ya existen quedan en 'virtual', que es el default.
+-- Este bloque es idempotente: se puede correr desde acá hasta el final.
+
+alter table turno
+  add column if not exists modalidad text not null default 'virtual';
+
+alter table turno
+  drop constraint if exists turno_modalidad_check;
+
+alter table turno
+  add constraint turno_modalidad_check check (modalidad in ('presencial', 'virtual'));

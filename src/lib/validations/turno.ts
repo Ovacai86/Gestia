@@ -11,6 +11,17 @@ export function permitePago(estado: (typeof TURNO_ESTADOS)[number]): boolean {
   return (ESTADOS_CON_PAGO as readonly string[]).includes(estado);
 }
 
+// Presencial o virtual. En la base es text con un check, igual que `origen`.
+export const TURNO_MODALIDADES = ["presencial", "virtual"] as const;
+
+export const MODALIDAD_POR_DEFECTO = "virtual" as const;
+
+export function esModalidadValida(
+  valor: string,
+): valor is (typeof TURNO_MODALIDADES)[number] {
+  return (TURNO_MODALIDADES as readonly string[]).includes(valor);
+}
+
 export const turnoSchema = z
   .object({
     paciente_id: z.string().trim().min(1, "Elegí un paciente."),
@@ -29,14 +40,20 @@ export const turnoSchema = z
     estado: z.enum(TURNO_ESTADOS),
     // Opcional: si el paciente no tiene monto por sesión, el turno se guarda
     // igual y el monto queda sin cargar.
+    // Dos refines separados para que el mensaje sea el que corresponde: con la
+    // excepción de monto el campo se escribe a mano, así que "-10" tiene que
+    // decir que no puede ser negativo, no que no es un número.
     monto: z
       .string()
       .trim()
+      .refine((v) => v === "" || Number.isFinite(Number(v)), "El monto tiene que ser un número.")
+      // Cero es válido (una sesión sin cargo); negativo no.
       .refine(
-        (v) => v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0),
-        "El monto tiene que ser un número.",
+        (v) => !Number.isFinite(Number(v)) || Number(v) >= 0,
+        "El monto no puede ser negativo.",
       ),
     pagado: z.boolean(),
+    modalidad: z.enum(TURNO_MODALIDADES),
     motivo_cancelacion: z.string().trim().optional(),
     // Recurrencia semanal. Solo aplica al alta: editando un turno no se toca.
     recurrente: z.boolean(),

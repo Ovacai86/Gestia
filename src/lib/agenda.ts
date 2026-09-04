@@ -197,6 +197,75 @@ export function caeEnDisponibilidad(
   );
 }
 
+// Un turno que tapa un bloque, ya leído en calendario AR.
+export type TurnoOcupado = { fecha: string; hora: string; duracion_minutos: number };
+
+// Cuántos días se miran hacia adelante buscando un bloque libre. Es un tope de
+// seguridad: si no hay disponibilidad cargada o está todo ocupado, la búsqueda
+// corta y el alta queda sin precargar, que es el comportamiento de antes.
+export const DIAS_BUSQUEDA_BLOQUE = 60;
+
+// Un bloque está tomado si algún turno se le solapa, o si algún turno arranca
+// en una de las filas que el bloque ocupa. Lo segundo es lo que hace que la
+// grilla muestre ese turno en la celda en vez de "Libre": sin esa condición se
+// podría sugerir un horario que en el calendario se ve ocupado.
+function bloqueTomado(bloque: Bloque, delDia: TurnoOcupado[]): boolean {
+  const inicio = aMinutos(bloque.inicio);
+  const fin = aMinutos(bloque.fin);
+
+  return delDia.some((turno) => {
+    const otroInicio = aMinutos(turno.hora);
+    const otroFin = otroInicio + turno.duracion_minutos;
+    return (otroInicio < fin && inicio < otroFin) || bloque.horas.includes(horaDe(turno.hora));
+  });
+}
+
+// El primer bloque de la agenda que arranca de `desde` en adelante y no tiene
+// ningún turno encima. Sirve para precargar el alta cuando se entra derecho a
+// /turnos/nuevo, sin pasar por un bloque del calendario.
+//
+// La hora sale del bloque, no se redondea: los bloques arrancan donde arranca
+// la franja y se repiten cada hora, así que con franjas en punto los horarios
+// sugeridos caen siempre en punto.
+export function primerBloqueLibre(
+  desde: { fecha: string; hora: string },
+  disponibilidades: DisponibilidadConFranjas[],
+  duracion: number,
+  excepciones: ExcepcionDisponibilidad[],
+  ocupados: TurnoOcupado[],
+): { fecha: string; hora: string } | null {
+  if (duracion <= 0) {
+    return null;
+  }
+
+  const porFecha = new Map<string, TurnoOcupado[]>();
+  for (const turno of ocupados) {
+    const delDia = porFecha.get(turno.fecha);
+    if (delDia) {
+      delDia.push(turno);
+    } else {
+      porFecha.set(turno.fecha, [turno]);
+    }
+  }
+
+  for (let i = 0; i < DIAS_BUSQUEDA_BLOQUE; i++) {
+    const fecha = sumarDias(desde.fecha, i);
+    const delDia = porFecha.get(fecha) ?? [];
+
+    for (const bloque of bloquesOfrecibles(fecha, disponibilidades, duracion, excepciones)) {
+      // Hoy solo cuentan los bloques que todavía no arrancaron.
+      if (i === 0 && bloque.inicio < desde.hora) {
+        continue;
+      }
+      if (!bloqueTomado(bloque, delDia)) {
+        return { fecha, hora: bloque.inicio };
+      }
+    }
+  }
+
+  return null;
+}
+
 // La fila de la grilla a la que pertenece un "HH:MM".
 export function horaDe(hora: string): number {
   return Number(hora.slice(0, 2));

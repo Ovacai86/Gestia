@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import type { Turno, TurnoEstado } from "@/types/turno";
+import type { Turno, TurnoEstado, TurnoModalidad } from "@/types/turno";
 import type { DisponibilidadConFranjas } from "@/types/disponibilidad";
 import {
   caeEnDisponibilidad,
@@ -19,11 +19,20 @@ import {
   planificarCancelacion,
   type TurnoSerieRow,
 } from "@/lib/serie";
-import { permitePago } from "@/lib/validations/turno";
+import {
+  esModalidadValida,
+  MODALIDAD_POR_DEFECTO,
+  permitePago,
+} from "@/lib/validations/turno";
 
 // El formulario ya deshabilita el check de pagado cuando el estado no lo
 // permite; esto es la barrera del server, para lo que llegue salteándolo.
 const ERROR_PAGADO = "Solo se puede marcar como pagado un turno confirmado o realizado.";
+
+// El monto se puede escribir a mano con la excepción del turno, así que ahora
+// puede llegar cualquier cosa. Cero es válido (una sesión sin cargo); negativo
+// no: eso sería un egreso, y para eso están los gastos.
+const ERROR_MONTO = "El monto no puede ser negativo.";
 
 // Un turno de la serie que pisa a uno que ya estaba. Se crea igual: el
 // profesional decide después qué hacer con cada caso.
@@ -67,6 +76,9 @@ function readTurnoForm(formData: FormData) {
   const duracion = Number(formData.get("duracion_minutos") ?? 50);
   const estado = String(formData.get("estado") ?? "programado") as TurnoEstado;
   const motivoCancelacion = String(formData.get("motivo_cancelacion") ?? "").trim();
+  // Lo que no sea 'presencial' o 'virtual' cae en el default, igual que haría
+  // la columna: el check de la base rechazaría cualquier otra cosa.
+  const modalidad = String(formData.get("modalidad") ?? "");
 
   return {
     paciente_id: String(formData.get("paciente_id") ?? ""),
@@ -77,6 +89,7 @@ function readTurnoForm(formData: FormData) {
     // trata el null como cero al sumar.
     monto: montoCrudo && Number.isFinite(Number(montoCrudo)) ? Number(montoCrudo) : null,
     pagado: formData.get("pagado") === "on",
+    modalidad: esModalidadValida(modalidad) ? modalidad : MODALIDAD_POR_DEFECTO,
     motivo_cancelacion: estado === "cancelado" && motivoCancelacion ? motivoCancelacion : null,
   };
 }
@@ -107,6 +120,9 @@ type BaseSerie = {
   estado: TurnoEstado;
   monto: number | null;
   pagado: boolean;
+  // La modalidad sí se hereda a toda la serie: si las sesiones son virtuales,
+  // lo son todas las semanas.
+  modalidad: TurnoModalidad;
   motivo_cancelacion: string | null;
 };
 
@@ -132,18 +148,25 @@ async function generarSerieSemanal({
   // puede nacer pagado. El resto de la serie usa base.pagado, que en los dos
   // llamadores es false: una repetición futura no la pagó nadie todavía.
   pagadoDelPrimero,
+  // Lo mismo con el monto: si el turno base lleva un monto de excepción, es de
+  // ese turno nomás, y las repeticiones usan el base.monto que arma el
+  // llamador con el monto por sesión de la ficha. Puede ser null, así que la
+  // comparación va contra undefined, no contra un valor falsy.
+  montoDelPrimero,
 }: {
   base: BaseSerie;
   fechas: string[];
   hora: string;
   omitidas: number;
   pagadoDelPrimero?: boolean;
+  montoDelPrimero?: number | null;
 }): Promise<TurnoFormState> {
   const supabase = await createClient();
 
   const filas = fechas.map((fecha, i) => ({
     ...base,
     pagado: i === 0 && pagadoDelPrimero !== undefined ? pagadoDelPrimero : base.pagado,
+    monto: i === 0 && montoDelPrimero !== undefined ? montoDelPrimero : base.monto,
     fecha_hora: new Date(`${fecha}T${hora}:00-03:00`).toISOString(),
   }));
 
@@ -231,6 +254,9 @@ export async function crearTurno(
   if (data.pagado && !permitePago(data.estado)) {
     return { error: ERROR_PAGADO };
   }
+  if (data.monto != null && data.monto < 0) {
+    return { error: ERROR_MONTO };
+  }
 
   const supabase = await createClient();
 
@@ -267,14 +293,23 @@ export async function crearTurno(
     };
   }
 
+  // Las repeticiones cobran lo que dice la ficha, no lo que se haya escrito a
+  // mano con la excepción de monto: esa vale para el turno base solamente.
+  const { data: paciente } = await supabase
+    .from("paciente")
+    .select("monto_fijo")
+    .eq("id", data.paciente_id)
+    .maybeSingle<{ monto_fijo: number | null }>();
+
   const resultado = await generarSerieSemanal({
-    // El pagado del formulario vale solo para el turno que el profesional está
-    // cargando: las repeticiones nacen sin pagar, aunque el check venga tildado.
-    base: { ...data, pagado: false },
+    // El pagado y el monto del formulario valen solo para el turno que el
+    // profesional está cargando; la serie usa lo que dice la ficha.
+    base: { ...data, pagado: false, monto: paciente?.monto_fijo ?? null },
     fechas,
     hora: horaInicial,
     omitidas: 0,
     pagadoDelPrimero: data.pagado,
+    montoDelPrimero: data.monto,
   });
 
   if (resultado.error) {
@@ -309,6 +344,9 @@ export async function actualizarTurno(
   if (data.pagado && !permitePago(data.estado)) {
     return { error: ERROR_PAGADO };
   }
+  if (data.monto != null && data.monto < 0) {
+    return { error: ERROR_MONTO };
+  }
 
   const supabase = await createClient();
   const { error } = await supabase.from("turno").update(data).eq("id", id);
@@ -322,8 +360,10 @@ export async function actualizarTurno(
 }
 
 // Repite un turno que ya existe: crea las semanas siguientes con los mismos
-// paciente, duración y monto. El turno original no se toca ni se duplica, y las
-// repeticiones nacen programadas y sin pagar aunque el original no lo esté.
+// paciente, duración y modalidad. El turno original no se toca ni se duplica, y
+// las repeticiones nacen programadas, sin pagar y con el monto por sesión de la
+// ficha, aunque el original tuviera otro estado, estuviera pagado o llevara un
+// monto de excepción.
 export async function repetirTurno(
   id: string,
   _prevState: TurnoFormState,
@@ -377,6 +417,15 @@ export async function repetirTurno(
     };
   }
 
+  // El monto sale de la ficha, no del turno que se está repitiendo: si ese
+  // llevaba un monto de excepción, era de ese turno solo. Mismo criterio que en
+  // el alta con recurrencia.
+  const { data: paciente } = await supabase
+    .from("paciente")
+    .select("monto_fijo")
+    .eq("id", turno.paciente_id)
+    .maybeSingle<{ monto_fijo: number | null }>();
+
   const resultado = await generarSerieSemanal({
     base: {
       paciente_id: turno.paciente_id,
@@ -384,8 +433,11 @@ export async function repetirTurno(
       // Las repeticiones nacen limpias: el original puede estar realizado,
       // cancelado o pagado, y eso no se hereda a un turno futuro.
       estado: "programado",
-      monto: turno.monto,
+      monto: paciente?.monto_fijo ?? null,
       pagado: false,
+      // La modalidad sí se copia: es del arreglo con el paciente, no del
+      // estado puntual de este turno.
+      modalidad: turno.modalidad,
       motivo_cancelacion: null,
     },
     fechas,

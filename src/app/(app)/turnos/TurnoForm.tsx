@@ -15,6 +15,7 @@ import type { TurnoFormState } from "./actions";
 import { ResumenRecurrenciaAviso } from "./ResumenRecurrenciaAviso";
 import type { Turno } from "@/types/turno";
 import {
+  MODALIDAD_POR_DEFECTO,
   permitePago,
   turnoSchema,
   TURNO_ESTADOS,
@@ -22,6 +23,7 @@ import {
 } from "@/lib/validations/turno";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -68,23 +70,34 @@ export function TurnoForm({
   pacientes,
   turno,
   fechaHoraInicial,
+  fechaHoraSugerida,
   duracionBloque,
 }: {
   action: (state: TurnoFormState, formData: FormData) => Promise<TurnoFormState>;
   pacientes: PacienteOption[];
   turno?: Turno;
   // Precarga al llegar desde un bloque libre del calendario. Solo aplica al
-  // alta: editando manda siempre lo que ya tiene el turno.
+  // alta: editando manda siempre lo que ya tiene el turno. Deja los campos de
+  // solo lectura: la elección ya se hizo en la grilla.
   fechaHoraInicial?: string;
+  // Precarga al entrar derecho a /turnos/nuevo: el primer bloque libre. A
+  // diferencia de la anterior es una sugerencia, así que los campos se pueden
+  // editar.
+  fechaHoraSugerida?: string;
   // La duración global de configuracion_agenda. Null si todavía no se configuró.
   duracionBloque?: number | null;
 }) {
   const [state, formAction, pending] = useActionState(action, { error: null });
   const [pastDateOpen, setPastDateOpen] = useState(false);
+  // Habilita el monto para escribirlo a mano en este turno nomás.
+  const [montoExcepcion, setMontoExcepcion] = useState(false);
   const pendingValuesRef = useRef<TurnoFormValues | null>(null);
 
-  const [fechaInicial, horaInicial] = fechaHoraInicial
-    ? [fechaHoraInicial.slice(0, 10), fechaHoraInicial.slice(11, 16)]
+  // La del bloque clickeado manda sobre la sugerida; si no hay ninguna, el alta
+  // arranca con fecha y hora vacías.
+  const precarga = fechaHoraInicial ?? fechaHoraSugerida;
+  const [fechaInicial, horaInicial] = precarga
+    ? [precarga.slice(0, 10), precarga.slice(11, 16)]
     : ["", ""];
   const fechaHoraDelTurno = turno ? toDatetimeLocalValue(turno.fecha_hora) : "";
 
@@ -104,6 +117,7 @@ export function TurnoForm({
       estado: turno?.estado ?? "programado",
       monto: turno?.monto != null ? String(turno.monto) : "",
       pagado: turno?.pagado ?? false,
+      modalidad: turno?.modalidad ?? MODALIDAD_POR_DEFECTO,
       motivo_cancelacion: turno?.motivo_cancelacion ?? "",
       recurrente: false,
       fecha_fin_recurrencia: "",
@@ -130,6 +144,29 @@ export function TurnoForm({
   // Pagado solo tiene sentido en un turno que se va a hacer o ya se hizo. El
   // server valida lo mismo: esto es la UX, no la barrera.
   const pagadoHabilitado = permitePago(estado);
+
+  // El monto se escribe a mano solo con la excepción tildada.
+  const montoEditable = montoExcepcion;
+
+  // Lo que mostraría el campo sin excepción: el monto congelado del turno
+  // mientras no se cambie de paciente (el monto_fijo de la ficha pudo haber
+  // cambiado después), y el del paciente elegido en cuanto se cambia o cuando
+  // es un alta, donde todavía no hay monto congelado.
+  function montoAutomatico(): string {
+    if (turno && pacienteId === turno.paciente_id) {
+      return turno.monto != null ? String(turno.monto) : "";
+    }
+    const elegido = pacientes.find((p) => p.id === pacienteId);
+    return elegido?.monto_fijo != null ? String(elegido.monto_fijo) : "";
+  }
+
+  // Destildar la excepción es deshacer.
+  function alternarMontoExcepcion(activa: boolean) {
+    setMontoExcepcion(activa);
+    if (!activa) {
+      form.setValue("monto", montoAutomatico(), { shouldValidate: true });
+    }
+  }
 
   // Si el estado pasa a uno que no admite pago, el tilde no puede quedar
   // colgado: se destilda solo, para no guardar un pagado que la UI ya no deja
@@ -162,11 +199,18 @@ export function TurnoForm({
     }
 
     pacienteSincronizado.current = pacienteId;
+
+    // Con la excepción activa el monto lo está escribiendo el profesional a
+    // mano: cambiar de paciente no se lo pisa.
+    if (montoExcepcion) {
+      return;
+    }
+
     const elegido = pacientes.find((p) => p.id === pacienteId);
     form.setValue("monto", elegido?.monto_fijo != null ? String(elegido.monto_fijo) : "", {
       shouldValidate: true,
     });
-  }, [pacienteId, pacientes, form]);
+  }, [pacienteId, pacientes, form, montoExcepcion]);
 
   function submitValues(values: TurnoFormValues) {
     const formData = new FormData();
@@ -180,6 +224,7 @@ export function TurnoForm({
     if (values.pagado) {
       formData.set("pagado", "on");
     }
+    formData.set("modalidad", values.modalidad);
     formData.set("motivo_cancelacion", values.motivo_cancelacion ?? "");
     if (esAlta && values.recurrente) {
       formData.set("recurrente", "on");
@@ -315,10 +360,33 @@ export function TurnoForm({
               name="monto"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Monto</FormLabel>
-                  <Input {...field} readOnly className="bg-gray-50 text-gray-600" />
+                  {/* h-3.5 es el alto del label solo: sin fijarlo, el check
+                      estira la fila y el input de Monto queda más abajo que el
+                      de Duración, que está al lado. */}
+                  <div className="flex h-3.5 items-center justify-between gap-2">
+                    <FormLabel>Monto</FormLabel>
+                    <Label className="flex items-center gap-1.5 text-xs font-normal text-gray-500">
+                      <Checkbox
+                        checked={montoExcepcion}
+                        onCheckedChange={alternarMontoExcepcion}
+                        className="size-3.5"
+                      />
+                      Excepción
+                    </Label>
+                  </div>
+                  <Input
+                    {...field}
+                    readOnly={!montoEditable}
+                    inputMode="decimal"
+                    className={montoEditable ? undefined : "bg-gray-50 text-gray-600"}
+                    aria-invalid={!!form.formState.errors.monto}
+                  />
                   <p className="mt-1 text-xs text-gray-500">
-                    Sale del monto por sesión del paciente. Queda vacío si no lo tiene cargado.
+                    {!montoEditable
+                      ? "Sale del monto por sesión del paciente. Queda vacío si no lo tiene cargado."
+                      : esAlta && recurrente
+                        ? "Vale solo para este turno. Las repeticiones usan el monto por sesión del paciente."
+                        : "Vale solo para este turno. No cambia el monto por sesión del paciente ni los otros turnos."}
                   </p>
                   <FormMessage />
                 </FormItem>
@@ -359,6 +427,40 @@ export function TurnoForm({
                       ))}
                     </SelectContent>
                   </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Ocupa la segunda columna de la fila del estado, que estaba
+                vacía. No es un on/off: son dos opciones, con el nombre de cada
+                una a cada lado del switch. */}
+            <FormField
+              control={form.control}
+              name="modalidad"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Modalidad</FormLabel>
+                  <Label className="flex h-8 w-fit items-center gap-2 text-sm font-normal">
+                    <span
+                      className={
+                        field.value === "presencial" ? "text-gray-900" : "text-gray-400"
+                      }
+                    >
+                      Presencial
+                    </span>
+                    <Switch
+                      checked={field.value === "virtual"}
+                      onCheckedChange={(virtual) =>
+                        field.onChange(virtual ? "virtual" : "presencial")
+                      }
+                    />
+                    <span
+                      className={field.value === "virtual" ? "text-gray-900" : "text-gray-400"}
+                    >
+                      Virtual
+                    </span>
+                  </Label>
                   <FormMessage />
                 </FormItem>
               )}

@@ -57,9 +57,10 @@ export function RepetirSerieForm({
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onValid)} onKeyDown={bloquearEnter} noValidate className="space-y-4">
             <p className="text-sm text-gray-500">
-              Crea un turno por semana los {diaYHora}, con el mismo paciente, duración y monto.
-              Este turno no se toca ni se duplica: la serie arranca la semana siguiente, y los
-              turnos nuevos nacen programados y sin pagar.
+              Crea un turno por semana los {diaYHora}, con el mismo paciente, duración y
+              modalidad. Este turno no se toca ni se duplica: la serie arranca la semana
+              siguiente, y los turnos nuevos nacen programados, sin pagar y con el monto por
+              sesión de la ficha del paciente.
             </p>
 
             <FormField
