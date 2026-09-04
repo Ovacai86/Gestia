@@ -2,6 +2,15 @@ import { z } from "zod";
 
 export const TURNO_ESTADOS = ["programado", "confirmado", "realizado", "cancelado"] as const;
 
+// Un turno solo puede figurar pagado si la sesión se va a hacer o ya se hizo:
+// en "programado" todavía no hay nada cobrado, y un "cancelado" que se había
+// cobrado se resuelve con una devolución, no dejándolo marcado como pagado.
+export const ESTADOS_CON_PAGO = ["confirmado", "realizado"] as const;
+
+export function permitePago(estado: (typeof TURNO_ESTADOS)[number]): boolean {
+  return (ESTADOS_CON_PAGO as readonly string[]).includes(estado);
+}
+
 export const turnoSchema = z
   .object({
     paciente_id: z.string().trim().min(1, "Elegí un paciente."),

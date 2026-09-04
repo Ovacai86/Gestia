@@ -3,9 +3,11 @@ import { createClient } from "@/lib/supabase/server";
 import type { Turno } from "@/types/turno";
 import { TurnoForm } from "../TurnoForm";
 import { RepetirSerieForm } from "../RepetirSerieForm";
-import { actualizarTurno, eliminarTurno, repetirTurno } from "../actions";
+import { CancelarSerieForm } from "../CancelarSerieForm";
+import { actualizarTurno, cancelarSerie, eliminarTurno, repetirTurno } from "../actions";
 import { DIAS_SEMANA } from "@/types/disponibilidad";
-import { diaSemanaDe, fechaHoraEnAR, sumarDias } from "@/lib/agenda";
+import { armarSerie, type TurnoSerieRow } from "@/lib/serie";
+import { diaSemanaDe, fechaHoraEnAR, hoyEnAR, sumarDias } from "@/lib/agenda";
 
 export default async function EditarTurnoPage({
   params,
@@ -28,18 +30,26 @@ export default async function EditarTurnoPage({
 
   // Incluimos el paciente actual del turno aunque esté inactivo, para no
   // perder la selección al editar (si no, el <select> cae en otra opción).
-  const [{ data: activos }, { data: pacienteActual }] = await Promise.all([
-    supabase
-      .from("paciente")
-      .select("id, nombre_apellido, monto_fijo")
-      .eq("activo", true)
-      .order("nombre_apellido"),
-    supabase
-      .from("paciente")
-      .select("id, nombre_apellido, monto_fijo")
-      .eq("id", turno.paciente_id)
-      .maybeSingle(),
-  ]);
+  const [{ data: activos }, { data: pacienteActual }, { data: turnosDelPaciente }] =
+    await Promise.all([
+      supabase
+        .from("paciente")
+        .select("id, nombre_apellido, monto_fijo")
+        .eq("activo", true)
+        .order("nombre_apellido"),
+      supabase
+        .from("paciente")
+        .select("id, nombre_apellido, monto_fijo")
+        .eq("id", turno.paciente_id)
+        .maybeSingle(),
+      // Todos los turnos del paciente: la serie se recorta en memoria por día
+      // de la semana y hora, que no son columnas y no se pueden filtrar en SQL.
+      supabase
+        .from("turno")
+        .select("id, fecha_hora, estado, pagado")
+        .eq("paciente_id", turno.paciente_id)
+        .returns<TurnoSerieRow[]>(),
+    ]);
 
   const pacientes =
     pacienteActual && !activos?.some((p) => p.id === pacienteActual.id)
@@ -48,11 +58,16 @@ export default async function EditarTurnoPage({
 
   const actualizarEsteTurno = actualizarTurno.bind(null, id);
   const repetirEsteTurno = repetirTurno.bind(null, id);
+  const cancelarDesdeEsteTurno = cancelarSerie.bind(null, id);
 
   // La serie repite el mismo día de la semana y horario del turno, arrancando
   // una semana después: el original no se duplica.
   const { fecha: fechaTurno, hora: horaTurno } = fechaHoraEnAR(turno.fecha_hora);
   const diaYHora = `${DIAS_SEMANA[diaSemanaDe(fechaTurno)]} a las ${horaTurno}`;
+
+  // Los turnos que comparten paciente, día de la semana y hora con este. Con
+  // uno solo (este mismo) no hay serie que cancelar.
+  const serie = armarSerie(turnosDelPaciente ?? [], { fecha: fechaTurno, hora: horaTurno });
 
   return (
     <div>
@@ -71,6 +86,17 @@ export default async function EditarTurnoPage({
         primeraFecha={sumarDias(fechaTurno, 7)}
         diaYHora={diaYHora}
       />
+      {serie.length > 1 && (
+        <CancelarSerieForm
+          action={cancelarDesdeEsteTurno}
+          serie={serie}
+          actualId={id}
+          actualFecha={fechaTurno}
+          paciente={pacienteActual?.nombre_apellido ?? "este paciente"}
+          diaYHora={diaYHora.toLowerCase()}
+          hoy={hoyEnAR()}
+        />
+      )}
     </div>
   );
 }

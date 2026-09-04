@@ -14,7 +14,12 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import type { TurnoFormState } from "./actions";
 import { ResumenRecurrenciaAviso } from "./ResumenRecurrenciaAviso";
 import type { Turno } from "@/types/turno";
-import { turnoSchema, TURNO_ESTADOS, type TurnoFormValues } from "@/lib/validations/turno";
+import {
+  permitePago,
+  turnoSchema,
+  TURNO_ESTADOS,
+  type TurnoFormValues,
+} from "@/lib/validations/turno";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -108,6 +113,7 @@ export function TurnoForm({
   // useWatch en vez de form.watch: watch() no se puede memoizar y el linter lo
   // marca como incompatible con el compilador de React.
   const estado = useWatch({ control: form.control, name: "estado" });
+  const pagado = useWatch({ control: form.control, name: "pagado" });
   const recurrente = useWatch({ control: form.control, name: "recurrente" });
   const pacienteId = useWatch({ control: form.control, name: "paciente_id" });
   const duracion = useWatch({ control: form.control, name: "duracion_minutos" });
@@ -120,6 +126,19 @@ export function TurnoForm({
   // turno se guarda igual y la fila queda con monto null.
   const faltaDuracion = !duracion || Number(duracion) <= 0;
   const bloqueado = faltaDuracion;
+
+  // Pagado solo tiene sentido en un turno que se va a hacer o ya se hizo. El
+  // server valida lo mismo: esto es la UX, no la barrera.
+  const pagadoHabilitado = permitePago(estado);
+
+  // Si el estado pasa a uno que no admite pago, el tilde no puede quedar
+  // colgado: se destilda solo, para no guardar un pagado que la UI ya no deja
+  // ver ni tocar.
+  useEffect(() => {
+    if (!pagadoHabilitado && pagado) {
+      form.setValue("pagado", false);
+    }
+  }, [pagadoHabilitado, pagado, form]);
 
   // Enter no manda el formulario: con la recurrencia tildada, un Enter de más
   // creaba la serie entera sin pasar por el botón. Se permite en textarea (es
@@ -364,10 +383,27 @@ export function TurnoForm({
             control={form.control}
             name="pagado"
             render={({ field }) => (
-              <Label className="flex w-fit items-center gap-2">
-                <Checkbox checked={field.value} onCheckedChange={field.onChange} />
-                Pagado
-              </Label>
+              <div>
+                <Label
+                  className={
+                    pagadoHabilitado
+                      ? "flex w-fit items-center gap-2"
+                      : "flex w-fit items-center gap-2 text-gray-400"
+                  }
+                >
+                  <Checkbox
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                    disabled={!pagadoHabilitado}
+                  />
+                  Pagado
+                </Label>
+                {!pagadoHabilitado && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Se habilita cuando el turno está confirmado o realizado.
+                  </p>
+                )}
+              </div>
             )}
           />
 

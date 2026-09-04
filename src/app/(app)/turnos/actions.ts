@@ -9,9 +9,21 @@ import {
   caeEnDisponibilidad,
   esFechaValida,
   fechaHoraEnAR,
+  hoyEnAR,
   inicioDelDiaISO,
   sumarDias,
 } from "@/lib/agenda";
+import {
+  armarSerie,
+  esAlcanceValido,
+  planificarCancelacion,
+  type TurnoSerieRow,
+} from "@/lib/serie";
+import { permitePago } from "@/lib/validations/turno";
+
+// El formulario ya deshabilita el check de pagado cuando el estado no lo
+// permite; esto es la barrera del server, para lo que llegue salteándolo.
+const ERROR_PAGADO = "Solo se puede marcar como pagado un turno confirmado o realizado.";
 
 // Un turno de la serie que pisa a uno que ya estaba. Se crea igual: el
 // profesional decide después qué hacer con cada caso.
@@ -115,16 +127,23 @@ async function generarSerieSemanal({
   fechas,
   hora,
   omitidas,
+  // Qué se guarda en `pagado` de la primera fecha. Solo lo usa el alta: ahí la
+  // primera fecha es el turno que el profesional está cargando, el único que
+  // puede nacer pagado. El resto de la serie usa base.pagado, que en los dos
+  // llamadores es false: una repetición futura no la pagó nadie todavía.
+  pagadoDelPrimero,
 }: {
   base: BaseSerie;
   fechas: string[];
   hora: string;
   omitidas: number;
+  pagadoDelPrimero?: boolean;
 }): Promise<TurnoFormState> {
   const supabase = await createClient();
 
-  const filas = fechas.map((fecha) => ({
+  const filas = fechas.map((fecha, i) => ({
     ...base,
+    pagado: i === 0 && pagadoDelPrimero !== undefined ? pagadoDelPrimero : base.pagado,
     fecha_hora: new Date(`${fecha}T${hora}:00-03:00`).toISOString(),
   }));
 
@@ -209,6 +228,9 @@ export async function crearTurno(
   if (!data.fecha_hora) {
     return { error: "La fecha y hora son obligatorias." };
   }
+  if (data.pagado && !permitePago(data.estado)) {
+    return { error: ERROR_PAGADO };
+  }
 
   const supabase = await createClient();
 
@@ -246,10 +268,13 @@ export async function crearTurno(
   }
 
   const resultado = await generarSerieSemanal({
-    base: data,
+    // El pagado del formulario vale solo para el turno que el profesional está
+    // cargando: las repeticiones nacen sin pagar, aunque el check venga tildado.
+    base: { ...data, pagado: false },
     fechas,
     hora: horaInicial,
     omitidas: 0,
+    pagadoDelPrimero: data.pagado,
   });
 
   if (resultado.error) {
@@ -280,6 +305,9 @@ export async function actualizarTurno(
   }
   if (!data.fecha_hora) {
     return { error: "La fecha y hora son obligatorias." };
+  }
+  if (data.pagado && !permitePago(data.estado)) {
+    return { error: ERROR_PAGADO };
   }
 
   const supabase = await createClient();
@@ -381,5 +409,77 @@ export async function eliminarTurno(id: string) {
   revalidatePath("/turnos");
   // Se llama desde /turnos/[id]: sin redirect, el re-render busca un turno que
   // ya no existe y cae en notFound().
+  redirect("/turnos");
+}
+
+export type CancelarSerieState = { error: string | null };
+
+// Cancela un turno o el tramo de serie que se haya elegido. La serie no es una
+// fila: son los turnos del mismo paciente que caen el mismo día de la semana y
+// a la misma hora que este (ver armarSerie).
+//
+// El plan se rehace acá aunque el cliente ya lo haya calculado para mostrar el
+// resumen: lo que se ve en pantalla es UX, la barrera es esta. Un turno
+// realizado, uno pagado y uno pasado nunca se cancelan por alcance; se saltean
+// y el usuario ya los vio listados antes de confirmar.
+export async function cancelarSerie(
+  id: string,
+  _prevState: CancelarSerieState,
+  formData: FormData,
+): Promise<CancelarSerieState> {
+  const alcance = String(formData.get("alcance") ?? "");
+  const motivo = String(formData.get("motivo") ?? "").trim();
+
+  if (!esAlcanceValido(alcance)) {
+    return { error: "Elegí qué turnos querés cancelar." };
+  }
+
+  const supabase = await createClient();
+
+  const { data: turno } = await supabase
+    .from("turno")
+    .select("*")
+    .eq("id", id)
+    .returns<Turno[]>()
+    .maybeSingle();
+
+  if (!turno) {
+    return { error: "No encontramos el turno que querés cancelar." };
+  }
+
+  const { fecha, hora } = fechaHoraEnAR(turno.fecha_hora);
+
+  const { data: delPaciente } = await supabase
+    .from("turno")
+    .select("id, fecha_hora, estado, pagado")
+    .eq("paciente_id", turno.paciente_id)
+    .returns<TurnoSerieRow[]>();
+
+  const plan = planificarCancelacion({
+    serie: armarSerie(delPaciente ?? [], { fecha, hora }),
+    actual: { id, fecha },
+    alcance,
+    hoy: hoyEnAR(),
+  });
+
+  if (plan.cancelables.length === 0) {
+    return {
+      error: "No quedó ningún turno para cancelar: están todos realizados, pagados o pasados.",
+    };
+  }
+
+  const { error } = await supabase
+    .from("turno")
+    .update({ estado: "cancelado", motivo_cancelacion: motivo || null })
+    .in(
+      "id",
+      plan.cancelables.map((t) => t.id),
+    );
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  revalidatePath("/turnos");
   redirect("/turnos");
 }

@@ -71,6 +71,17 @@ referenciar otra columna de la misma fila): lo completa el trigger
 `turno_aceptado_por_profesional_default`, que antes de cada insert lo resuelve como
 `origen = 'profesional'` cuando viene en null.
 
+`pagado` solo puede ser true si el estado es `confirmado` o `realizado`
+(`ESTADOS_CON_PAGO` / `permitePago` en `src/lib/validations/turno.ts`): en
+`programado` todavía no hay nada cobrado y un `cancelado` cobrado se resuelve con
+una devolución. El formulario deshabilita el check y lo destilda solo al cambiar a
+un estado que no lo admite; `crearTurno` y `actualizarTurno` rechazan el guardado
+igual, por si llega salteando el form. La restricción es de app, no de schema.
+
+En el alta con recurrencia, el `pagado` del formulario vale solo para el turno base
+(la primera fecha, el que el profesional está cargando): las repeticiones se crean
+siempre con `pagado = false`.
+
 ### gasto
 - id (uuid, PK)
 - fecha (date)
@@ -130,7 +141,9 @@ Todo cuelga del grupo `(app)`, que exige sesión; `/login` es la única ruta pú
   fecha de fin (tope de 200 turnos por recurrencia)
 - `/turnos/[id]` — edición de un turno, y desde ahí se puede repetir semanalmente
   hacia adelante: crea las semanas siguientes con el mismo día, horario, paciente,
-  duración y monto, sin tocar ni duplicar el original
+  duración y monto, sin tocar ni duplicar el original. Si el turno pertenece a una
+  serie también se puede cancelar en bloque, al estilo Outlook: solo este turno,
+  este y los siguientes, o toda la serie (ver "Series de turnos")
 - `/turnos/configuracion` — disponibilidad: qué días se atiende, una o más franjas
   horarias por día y la duración del bloque (global, en configuracion_agenda). Es la
   pantalla que alimenta los bloques que ofrece la agenda: sin días cargados o sin
@@ -139,6 +152,24 @@ Todo cuelga del grupo `(app)`, que exige sesión; `/login` es la única ruta pú
   tocan: se listan para resolverlos a mano.
 - `/gastos`, `/gastos/nuevo`, `/gastos/[id]` — listado, alta y edición
 - `/balance` — totales de ingresos y egresos
+
+## Series de turnos
+Una serie no existe como fila ni como columna: es el conjunto de turnos del mismo
+paciente que caen el mismo día de la semana y a la misma hora, calculado en memoria
+sobre `fecha_hora` leída en calendario AR. La lógica vive en `src/lib/serie.ts`
+(`armarSerie`, `turnosEnAlcance`, `planificarCancelacion`), que es código puro y lo
+comparten el cliente y la server action.
+
+Al cancelar en bloque ("este y los siguientes" o "toda la serie") hay reglas de
+protección: nunca se cancela un turno `realizado`, uno con `pagado = true` ni uno con
+fecha anterior a hoy. Esos se saltean y se listan con el motivo en el resumen que se
+muestra ANTES de confirmar. Los turnos ya cancelados no se cuentan ni se listan: no son
+un salteo. "Solo este turno" no pasa por el resumen ni por las protecciones — es el
+comportamiento de siempre, equivalente a poner Estado = Cancelado y guardar.
+
+El resumen que ve el usuario lo calcula el cliente para que sea instantáneo, pero
+`cancelarSerie` rehace el mismo plan en el servidor antes de escribir: la pantalla es
+UX, la barrera es la acción.
 
 ## Convenciones de código
 - Nombres de archivos y componentes en inglés, texto de la interfaz en español.
