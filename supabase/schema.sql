@@ -29,6 +29,10 @@ create table if not exists turno (
   -- Sin monto es null, no cero: el paciente puede no tener monto por sesión
   -- definido. El balance trata el null como cero al sumar.
   monto numeric(10, 2),
+  -- El monto se escribió a mano para este turno (check "Excepción" del
+  -- formulario). Marca al turno como intocable para la propagación del
+  -- monto_fijo del paciente: ese monto vale para este turno y nada más.
+  monto_excepcion boolean not null default false,
   pagado boolean not null default false,
   motivo_cancelacion text,
   -- Presencial o virtual. Los turnos nuevos nacen virtuales.
@@ -434,3 +438,41 @@ alter table turno
 
 alter table turno
   add constraint turno_modalidad_check check (modalidad in ('presencial', 'virtual'));
+
+-- Migración: excepción de monto por turno.
+-- Hasta acá, que el monto de un turno se hubiera escrito a mano (check
+-- "Excepción" del formulario) era solo estado del cliente: al guardar quedaba
+-- un número en turno.monto y no había forma de saber si salía de la ficha del
+-- paciente o lo había puesto el profesional. Esta columna lo persiste, para que
+-- la propagación del monto_fijo del paciente sepa a qué turnos no tocar.
+--
+-- Backfill por única vez, con una heurística conservadora: se marca como
+-- excepción todo turno cuyo monto no coincida con el monto_fijo que hoy tiene
+-- la ficha. Se prefiere proteger de más antes que pisar un monto cargado a
+-- mano. Los turnos con monto null quedan en false a propósito: eso no es una
+-- excepción sino un monto que nunca se cargó, y son justamente los que la
+-- propagación tiene que completar.
+--
+-- El backfill va adentro del if para que corra una sola vez, cuando la columna
+-- se crea. Si corriera en cada pasada, un cambio de monto_fijo sin propagar
+-- convertiría en excepción a un montón de turnos que no lo son.
+-- Este bloque es idempotente: se puede correr desde acá hasta el final.
+
+do $migracion$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_name = 'turno' and column_name = 'monto_excepcion'
+  ) then
+    alter table turno
+      add column monto_excepcion boolean not null default false;
+
+    update turno t
+    set monto_excepcion = true
+    from paciente p
+    where p.id = t.paciente_id
+      and t.monto is not null
+      and t.monto is distinct from p.monto_fijo;
+  end if;
+end
+$migracion$;
