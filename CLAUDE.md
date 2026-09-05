@@ -206,8 +206,9 @@ UX, la barrera es la acción.
   barrera (UX), no la única.
 - Toda acción que toque plata revalida también `/balance`, no solo su propia ruta: para eso
   están `revalidarTurnos()` y `revalidarGastos()` en `src/lib/revalidar.ts`. Un turno o un
-  gasto que cambia mueve dos pantallas. (`eliminarPaciente` todavía revalida solo
-  `/pacientes`, aunque el `on delete cascade` se lleve los turnos del paciente.)
+  gasto que cambia mueve dos pantallas. `eliminarPaciente` también las usa: el
+  `on delete cascade` se lleva los turnos del paciente. Crear o editar un paciente no,
+  porque el monto del turno queda congelado en su fila al crearlo.
 - `revalidatePath` no alcanza contra las cachés del navegador: volver con Atrás sirve la
   copia del Router Cache de Next, y una navegación dura vuelve del bfcache con el documento
   congelado. El total de ingresos de `/balance` se monta en un Client Component

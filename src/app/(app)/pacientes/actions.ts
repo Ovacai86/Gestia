@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { revalidarTurnos } from "@/lib/revalidar";
 
 export type PacienteFormState = { error: string | null };
 
@@ -78,4 +79,8 @@ export async function eliminarPaciente(id: string) {
   const supabase = await createClient();
   await supabase.from("paciente").delete().eq("id", id);
   revalidatePath("/pacientes");
+  // El on delete cascade se lleva los turnos del paciente, así que esto mueve
+  // el calendario y el balance, no solo el listado. Crear o editar un paciente
+  // no los toca: el monto del turno queda congelado en su fila al crearlo.
+  revalidarTurnos();
 }
