@@ -3,34 +3,118 @@
 import { startTransition, useActionState, useMemo, useState } from "react";
 import type { CancelarSerieState } from "./actions";
 import {
+  motivoDeProteccion,
   planificarCancelacion,
   turnosEnAlcance,
   type AlcanceCancelacion,
   type MotivoSalteo,
+  type PlanCancelacion,
   type TurnoDeSerie,
 } from "@/lib/serie";
 import { formatearDiaCorto } from "@/lib/agenda";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
+// Para las listas, donde va detrás de la fecha: "11 sept — ya realizado".
 const MOTIVO_LABELS: Record<MotivoSalteo, string> = {
   realizado: "ya realizado",
   pagado: "ya pagado",
   pasado: "turno pasado",
 };
 
-// Con una serie larga la lista de fechas a cancelar se corta: el detalle
-// completo está en el calendario, acá alcanza con el orden de magnitud.
+// Para el aviso de "Solo este turno", donde el motivo es el predicado de una
+// oración: "Este turno ya está realizado". Las etiquetas de arriba no sirven
+// acá: darían "Este turno está turno pasado".
+const MOTIVO_EN_ORACION: Record<MotivoSalteo, string> = {
+  realizado: "ya está realizado",
+  pagado: "ya está pagado",
+  pasado: "es un turno pasado",
+};
+
+// Con una serie larga las listas de fechas se cortan: el detalle completo está
+// en el calendario, acá alcanza con el orden de magnitud.
 const MAX_FECHAS_LISTADAS = 12;
 
 function turnos(n: number): string {
   return n === 1 ? "1 turno" : `${n} turnos`;
 }
 
+function recortar(fechas: string[]): string[] {
+  const resto = fechas.length - MAX_FECHAS_LISTADAS;
+  return resto > 0
+    ? [...fechas.slice(0, MAX_FECHAS_LISTADAS), `… y ${resto} más`]
+    : fechas;
+}
+
+// Por qué el resumen no tiene nada para cancelar. Se arma con lo que sí trajo el
+// plan, para no decir "están todos pagados" cuando en realidad ya estaban
+// cancelados.
+function razonSinCancelables(plan: PlanCancelacion): string {
+  // El número sale del total del alcance, no de cada lista: el sujeto de la
+  // oración es "el turno" o "los turnos", y los verbos tienen que concordar con
+  // eso aunque una de las dos listas tenga un solo elemento.
+  const total = plan.yaCancelados.length + plan.salteados.length;
+
+  if (total === 0) {
+    return "No hay turnos en este alcance.";
+  }
+
+  const uno = total === 1;
+  const motivos: string[] = [];
+
+  if (plan.yaCancelados.length > 0) {
+    motivos.push(uno ? "ya está cancelado" : "ya están cancelados");
+  }
+  if (plan.salteados.length > 0) {
+    motivos.push(
+      uno
+        ? "está realizado, está pagado o es un turno pasado"
+        : "están realizados, están pagados o son turnos pasados",
+    );
+  }
+
+  const sujeto = uno ? "el turno de este alcance" : "los turnos de este alcance";
+  return `No hay nada para cancelar: ${sujeto} ${motivos.join(" o ")}.`;
+}
+
+function BloqueDeFechas({
+  titulo,
+  fechas,
+  destacado,
+}: {
+  titulo: string;
+  fechas: string[];
+  destacado?: boolean;
+}) {
+  return (
+    <div>
+      <p className={destacado ? "text-sm font-medium text-gray-900" : "text-sm font-medium text-amber-900"}>
+        {titulo}
+      </p>
+      <ul className="mt-1 space-y-0.5 text-sm text-amber-900">
+        {recortar(fechas).map((linea) => (
+          <li key={linea}>{linea}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // Cancelación al estilo Outlook: solo este turno, este y los siguientes, o toda
-// la serie. Las dos últimas pasan por un resumen antes de escribir nada, porque
-// tocan turnos que no están en pantalla.
+// la serie. Los tres alcances pasan por el mismo resumen y por el mismo popup de
+// confirmación: elegir una opción no escribe nada, y lo único que escribe es
+// confirmar adentro del popup.
 export function CancelarSerieForm({
   action,
   serie,
@@ -55,7 +139,7 @@ export function CancelarSerieForm({
   const [abierto, setAbierto] = useState(false);
   const [alcance, setAlcance] = useState<AlcanceCancelacion>("solo");
   const [motivo, setMotivo] = useState("");
-  const [enResumen, setEnResumen] = useState(false);
+  const [confirmando, setConfirmando] = useState(false);
 
   const actual = useMemo(() => ({ id: actualId, fecha: actualFecha }), [actualId, actualFecha]);
 
@@ -96,13 +180,22 @@ export function CancelarSerieForm({
   }, [serie, actual, primera, ultima]);
 
   const elegida = opciones.find((o) => o.valor === alcance)!;
+  const hayQueCancelar = plan.cancelables.length > 0;
 
-  const fechasACancelar = useMemo(() => {
-    const fechas = plan.cancelables.map((t) => formatearDiaCorto(t.fecha));
-    const visibles = fechas.slice(0, MAX_FECHAS_LISTADAS).join(" · ");
-    const resto = fechas.length - MAX_FECHAS_LISTADAS;
-    return resto > 0 ? `${visibles} … y ${resto} más` : visibles;
-  }, [plan]);
+  // "Solo este turno" no aplica las protecciones, pero si el turno está
+  // realizado, pagado o pasado conviene decirlo antes de que confirme: es la
+  // información que hace falta para tomar la decisión.
+  const avisoDelSolo = useMemo(() => {
+    if (alcance !== "solo") {
+      return null;
+    }
+    const esteTurno = serie.find((t) => t.id === actual.id);
+    if (!esteTurno || esteTurno.estado === "cancelado") {
+      return null;
+    }
+    const motivoProteccion = motivoDeProteccion(esteTurno, hoy);
+    return motivoProteccion ? MOTIVO_EN_ORACION[motivoProteccion] : null;
+  }, [alcance, serie, actual.id, hoy]);
 
   function enviar() {
     const formData = new FormData();
@@ -126,7 +219,7 @@ export function CancelarSerieForm({
         </Button>
       )}
 
-      {abierto && !enResumen && (
+      {abierto && (
         <div className="space-y-4 border-t border-gray-200 pt-3">
           <div className="space-y-1">
             {opciones.map((opcion) => (
@@ -176,17 +269,16 @@ export function CancelarSerieForm({
           {state.error && <p className="text-sm text-destructive">{state.error}</p>}
 
           <div className="flex items-center gap-4">
-            {/* "Solo este turno" no lleva resumen: es lo mismo que poner Estado
-                = Cancelado arriba y guardar. */}
-            {alcance === "solo" ? (
-              <Button type="button" variant="destructive" onClick={enviar} disabled={pending}>
-                {pending ? "Cancelando…" : "Cancelar este turno"}
-              </Button>
-            ) : (
-              <Button type="button" onClick={() => setEnResumen(true)}>
-                Ver resumen
-              </Button>
-            )}
+            {/* Un solo botón para los tres alcances. No cancela: abre el
+                resumen, y recién ahí se confirma. */}
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => setConfirmando(true)}
+              disabled={pending}
+            >
+              {pending ? "Cancelando…" : "Cancelar"}
+            </Button>
             <button
               type="button"
               onClick={() => setAbierto(false)}
@@ -198,67 +290,78 @@ export function CancelarSerieForm({
         </div>
       )}
 
-      {abierto && enResumen && (
-        <div className="space-y-3 border-t border-gray-200 pt-3">
-          <p className="text-sm font-medium text-gray-900">
-            {elegida.titulo} · {diaYHora}
-          </p>
+      <AlertDialog
+        open={confirmando}
+        onOpenChange={(open) => {
+          // Mientras la acción está corriendo el popup no se cierra: el
+          // resultado es un redirect al calendario.
+          if (!pending) {
+            setConfirmando(open);
+          }
+        }}
+      >
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {elegida.titulo} · {diaYHora}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {hayQueCancelar
+                ? "Revisá el detalle antes de confirmar. Esto no se deshace solo."
+                : razonSinCancelables(plan)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
 
-          <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
-            {plan.cancelables.length > 0 ? (
-              <div>
-                <p className="text-sm font-medium text-gray-900">
-                  Se {plan.cancelables.length === 1 ? "cancela" : "cancelan"}{" "}
-                  {turnos(plan.cancelables.length)}
-                </p>
-                <p className="mt-1 text-sm text-amber-900">{fechasACancelar}</p>
-              </div>
-            ) : (
-              <p className="text-sm font-medium text-gray-900">No hay ningún turno para cancelar.</p>
+          <div className="max-h-64 space-y-3 overflow-y-auto rounded-lg border border-amber-200 bg-amber-50 p-4">
+            {hayQueCancelar && (
+              <BloqueDeFechas
+                destacado
+                titulo={`Se ${plan.cancelables.length === 1 ? "cancela" : "cancelan"} ${turnos(plan.cancelables.length)}`}
+                fechas={plan.cancelables.map((t) => formatearDiaCorto(t.fecha))}
+              />
+            )}
+
+            {avisoDelSolo && (
+              <p className="text-sm text-amber-900">
+                Este turno {avisoDelSolo}. Se cancela igual porque lo elegiste puntualmente.
+              </p>
             )}
 
             {plan.salteados.length > 0 && (
-              <div>
-                <p className="text-sm font-medium text-amber-900">
-                  Se {plan.salteados.length === 1 ? "saltea" : "saltean"}{" "}
-                  {turnos(plan.salteados.length)}
-                </p>
-                <ul className="mt-1 space-y-0.5 text-sm text-amber-900">
-                  {plan.salteados.map((salteado) => (
-                    <li key={salteado.id}>
-                      {formatearDiaCorto(salteado.fecha)} — {MOTIVO_LABELS[salteado.motivo]}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              <BloqueDeFechas
+                titulo={`Se ${plan.salteados.length === 1 ? "saltea" : "saltean"} ${turnos(plan.salteados.length)}`}
+                fechas={plan.salteados.map(
+                  (s) => `${formatearDiaCorto(s.fecha)} — ${MOTIVO_LABELS[s.motivo]}`,
+                )}
+              />
+            )}
+
+            {plan.yaCancelados.length > 0 && (
+              <BloqueDeFechas
+                titulo={`${turnos(plan.yaCancelados.length)} ${plan.yaCancelados.length === 1 ? "ya estaba cancelado" : "ya estaban cancelados"}`}
+                fechas={plan.yaCancelados.map((t) => formatearDiaCorto(t.fecha))}
+              />
             )}
           </div>
 
           {state.error && <p className="text-sm text-destructive">{state.error}</p>}
 
-          <div className="flex items-center gap-4">
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={enviar}
-              disabled={pending || plan.cancelables.length === 0}
-            >
-              {pending
-                ? "Cancelando…"
-                : plan.cancelables.length === 0
-                  ? "Confirmar"
-                  : `Confirmar: cancelar ${turnos(plan.cancelables.length)}`}
-            </Button>
-            <button
-              type="button"
-              onClick={() => setEnResumen(false)}
-              className="text-sm text-gray-600 hover:text-gray-900"
-            >
-              Volver
-            </button>
-          </div>
-        </div>
-      )}
+          <AlertDialogFooter>
+            {hayQueCancelar ? (
+              <>
+                <AlertDialogCancel disabled={pending}>Volver</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={enviar} disabled={pending}>
+                  {pending ? "Cancelando…" : `Cancelar ${turnos(plan.cancelables.length)}`}
+                </AlertDialogAction>
+              </>
+            ) : (
+              // Sin nada para cancelar no hay acción que ofrecer: la salida es
+              // cerrar, no un botón apagado que no explica nada.
+              <AlertDialogCancel>Entendido</AlertDialogCancel>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

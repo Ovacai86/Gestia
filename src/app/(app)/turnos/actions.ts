@@ -517,7 +517,8 @@ export async function cancelarSerie(
 
   if (plan.cancelables.length === 0) {
     return {
-      error: "No quedó ningún turno para cancelar: están todos realizados, pagados o pasados.",
+      error:
+        "No quedó ningún turno para cancelar: ya están cancelados, realizados, pagados o pasados.",
     };
   }
 

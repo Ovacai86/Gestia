@@ -23,13 +23,17 @@ export type TurnoDeSerie = {
 export const ALCANCES_CANCELACION = ["solo", "siguientes", "serie"] as const;
 export type AlcanceCancelacion = (typeof ALCANCES_CANCELACION)[number];
 
-// Por qué un turno del alcance no se cancela. Los ya cancelados no entran acá:
-// no son un salteo, simplemente no aplican.
+// Por qué un turno del alcance no se cancela.
 export type MotivoSalteo = "realizado" | "pagado" | "pasado";
 
 export type PlanCancelacion = {
   cancelables: { id: string; fecha: string }[];
   salteados: { id: string; fecha: string; motivo: MotivoSalteo }[];
+  // Los que ya estaban cancelados. No son un salteo (no hay nada que hacerles),
+  // pero se listan igual: omitirlos en silencio hacía que el resumen no
+  // explicara por qué un turno de la serie no aparecía en ninguna lista, y eso
+  // se leía como que la cancelación ya se había aplicado sola.
+  yaCancelados: { id: string; fecha: string }[];
 };
 
 export function esAlcanceValido(valor: string): valor is AlcanceCancelacion {
@@ -72,9 +76,26 @@ export function turnosEnAlcance(
   }
 }
 
-// Qué se cancela y qué se saltea. Lo usan el cliente para armar el resumen que
-// se muestra antes de confirmar y la server action para decidir qué escribe:
-// el resumen en pantalla es UX, la barrera real es el server.
+// Por qué un turno no se cancela al arrastrarlo dentro de un alcance. Null si
+// se puede cancelar. Se exporta aparte porque "Solo este turno" no aplica estas
+// reglas pero igual las muestra como aviso antes de confirmar.
+export function motivoDeProteccion(turno: TurnoDeSerie, hoy: string): MotivoSalteo | null {
+  if (turno.estado === "realizado") {
+    return "realizado";
+  }
+  if (turno.pagado) {
+    return "pagado";
+  }
+  if (turno.fecha < hoy) {
+    return "pasado";
+  }
+  return null;
+}
+
+// Qué se cancela, qué se saltea y qué ya estaba cancelado. Lo usan el cliente
+// para armar el resumen que se muestra antes de confirmar y la server action
+// para decidir qué escribe: el resumen en pantalla es UX, la barrera real es el
+// server.
 export function planificarCancelacion({
   serie,
   actual,
@@ -87,36 +108,28 @@ export function planificarCancelacion({
   hoy: string;
 }): PlanCancelacion {
   const enAlcance = turnosEnAlcance(serie, alcance, actual);
-
-  // "Solo este turno" es el comportamiento de siempre: cancelar el turno que
-  // se está editando, sin reglas de protección ni resumen.
-  if (alcance === "solo") {
-    return {
-      cancelables: enAlcance.map(({ id, fecha }) => ({ id, fecha })),
-      salteados: [],
-    };
-  }
-
-  const plan: PlanCancelacion = { cancelables: [], salteados: [] };
+  const plan: PlanCancelacion = { cancelables: [], salteados: [], yaCancelados: [] };
 
   for (const turno of enAlcance) {
+    const { id, fecha } = turno;
+
     if (turno.estado === "cancelado") {
-      continue;
-    }
-    if (turno.estado === "realizado") {
-      plan.salteados.push({ id: turno.id, fecha: turno.fecha, motivo: "realizado" });
-      continue;
-    }
-    if (turno.pagado) {
-      plan.salteados.push({ id: turno.id, fecha: turno.fecha, motivo: "pagado" });
-      continue;
-    }
-    if (turno.fecha < hoy) {
-      plan.salteados.push({ id: turno.id, fecha: turno.fecha, motivo: "pasado" });
+      plan.yaCancelados.push({ id, fecha });
       continue;
     }
 
-    plan.cancelables.push({ id: turno.id, fecha: turno.fecha });
+    // "Solo este turno" sigue sin reglas de protección: es el turno que se está
+    // editando, elegido a mano, y equivale a poner Estado = Cancelado arriba y
+    // guardar. Lo que cambió es que ahora también pasa por el resumen, donde el
+    // aviso de que está realizado, pagado o pasado se muestra igual.
+    const motivo = alcance === "solo" ? null : motivoDeProteccion(turno, hoy);
+
+    if (motivo) {
+      plan.salteados.push({ id, fecha, motivo });
+      continue;
+    }
+
+    plan.cancelables.push({ id, fecha });
   }
 
   return plan;
