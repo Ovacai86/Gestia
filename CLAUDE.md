@@ -168,15 +168,25 @@ Todo cuelga del grupo `(app)`, que exige sesión; `/login` es la única ruta pú
 Una serie no existe como fila ni como columna: es el conjunto de turnos del mismo
 paciente que caen el mismo día de la semana y a la misma hora, calculado en memoria
 sobre `fecha_hora` leída en calendario AR. La lógica vive en `src/lib/serie.ts`
-(`armarSerie`, `turnosEnAlcance`, `planificarCancelacion`), que es código puro y lo
-comparten el cliente y la server action.
+(`armarSerie`, `turnosEnAlcance`, `motivoDeProteccion`, `planificarCancelacion`), que es
+código puro y lo comparten el cliente y la server action.
+
+Los tres alcances pasan por el mismo camino: elegir una opción no escribe nada, un único
+botón "Cancelar" abre un `AlertDialog` con el resumen, y lo único que escribe es
+confirmar adentro de ese popup.
 
 Al cancelar en bloque ("este y los siguientes" o "toda la serie") hay reglas de
 protección: nunca se cancela un turno `realizado`, uno con `pagado = true` ni uno con
-fecha anterior a hoy. Esos se saltean y se listan con el motivo en el resumen que se
-muestra ANTES de confirmar. Los turnos ya cancelados no se cuentan ni se listan: no son
-un salteo. "Solo este turno" no pasa por el resumen ni por las protecciones — es el
-comportamiento de siempre, equivalente a poner Estado = Cancelado y guardar.
+fecha anterior a hoy. Esos se saltean y se listan con el motivo. Los ya cancelados van en
+una tercera lista (`yaCancelados`): no son un salteo, pero omitirlos hacía que el resumen
+no explicara por qué un turno de la serie no aparecía en ningún lado, y eso se leía como
+que la cancelación ya se había aplicado sola. Cuando no queda nada para cancelar, el popup
+dice el motivo y ofrece cerrar, no un botón deshabilitado.
+
+"Solo este turno" sigue sin aplicar las protecciones — es el turno que se está editando,
+elegido a mano, equivalente a poner Estado = Cancelado y guardar — pero pasa por el mismo
+resumen y la misma confirmación, y avisa si el turno está realizado, pagado o pasado antes
+de cancelarlo igual.
 
 El resumen que ve el usuario lo calcula el cliente para que sea instantáneo, pero
 `cancelarSerie` rehace el mismo plan en el servidor antes de escribir: la pantalla es
@@ -194,6 +204,15 @@ UX, la barrera es la acción.
   coerce rompe la inferencia de tipos entre el resolver y `useForm`.
 - Las server actions siguen validando del lado del servidor: el schema de Zod es la primera
   barrera (UX), no la única.
+- Toda acción que toque plata revalida también `/balance`, no solo su propia ruta: para eso
+  están `revalidarTurnos()` y `revalidarGastos()` en `src/lib/revalidar.ts`. Un turno o un
+  gasto que cambia mueve dos pantallas. (`eliminarPaciente` todavía revalida solo
+  `/pacientes`, aunque el `on delete cascade` se lleve los turnos del paciente.)
+- `revalidatePath` no alcanza contra las cachés del navegador: volver con Atrás sirve la
+  copia del Router Cache de Next, y una navegación dura vuelve del bfcache con el documento
+  congelado. El total de ingresos de `/balance` se monta en un Client Component
+  (`TotalIngresos`) que rehace el pedido; el bfcache necesita `location.reload()`, porque
+  ahí no se remonta nada y `router.refresh()` no llega a pintar.
 
 ## Comandos
 - `npm run dev` — levantar entorno de desarrollo
