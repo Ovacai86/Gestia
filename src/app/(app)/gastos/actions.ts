@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidarGastos } from "@/lib/revalidar";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
@@ -48,7 +48,7 @@ export async function crearGasto(
     return { error: dbError.message };
   }
 
-  revalidatePath("/gastos");
+  revalidarGastos();
   redirect("/gastos");
 }
 
@@ -70,12 +70,12 @@ export async function actualizarGasto(
     return { error: dbError.message };
   }
 
-  revalidatePath("/gastos");
+  revalidarGastos();
   redirect("/gastos");
 }
 
 export async function eliminarGasto(id: string) {
   const supabase = await createClient();
   await supabase.from("gasto").delete().eq("id", id);
-  revalidatePath("/gastos");
+  revalidarGastos();
 }

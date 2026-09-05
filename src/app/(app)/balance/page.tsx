@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { TotalIngresos } from "./TotalIngresos";
 import { fechaHoraEnAR, formatearRangoSemana, semanasDelMes } from "@/lib/agenda";
 import type { Gasto } from "@/types/gasto";
 import type { TurnoConPaciente } from "@/types/turno";
@@ -193,10 +194,9 @@ export default async function BalancePage({
       </div>
 
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          <div className="text-sm text-gray-500">Total de ingresos</div>
-          <div className="mt-1 text-2xl font-semibold text-green-600">{formatMonto(ingresos)}</div>
-        </div>
+        {/* Client Component: además de mostrar el número, vuelve a pedir la
+            página al volver con Atrás o al recuperar el foco la pestaña. */}
+        <TotalIngresos monto={formatMonto(ingresos)} />
         <div className="rounded-lg border border-gray-200 bg-white p-4">
           <div className="text-sm text-gray-500">Total de egresos</div>
           <div className="mt-1 text-2xl font-semibold text-red-600">{formatMonto(egresos)}</div>

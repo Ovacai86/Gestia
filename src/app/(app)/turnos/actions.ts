@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidarTurnos } from "@/lib/revalidar";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import type { Turno, TurnoEstado, TurnoModalidad } from "@/types/turno";
@@ -268,7 +268,7 @@ export async function crearTurno(
       return { error: error.message };
     }
 
-    revalidatePath("/turnos");
+    revalidarTurnos();
     redirect("/turnos");
   }
 
@@ -317,14 +317,15 @@ export async function crearTurno(
   }
 
   // Con algo para avisar no se redirige: el resumen se muestra en el form.
-  // Acá no se revalida /turnos a propósito: al quedarse en el formulario, el
-  // refresh del router deja la pestaña trabada un rato largo. El calendario es
-  // una ruta dinámica, así que se vuelve a pedir al servidor cuando se navega.
+  // Acá no se revalida a propósito: al quedarse en el formulario, el refresh
+  // del router deja la pestaña trabada un rato largo. El calendario y el
+  // balance son rutas dinámicas, así que se vuelven a pedir al servidor cuando
+  // se navega.
   if (hayAlgoQueAvisar(resultado.resumen)) {
     return resultado;
   }
 
-  revalidatePath("/turnos");
+  revalidarTurnos();
   redirect("/turnos");
 }
 
@@ -355,7 +356,7 @@ export async function actualizarTurno(
     return { error: error.message };
   }
 
-  revalidatePath("/turnos");
+  revalidarTurnos();
   redirect("/turnos");
 }
 
@@ -449,7 +450,7 @@ export async function repetirTurno(
     return { error: resultado.error };
   }
 
-  revalidatePath("/turnos");
+  revalidarTurnos();
   // Siempre se muestra el resumen: es la única devolución de que la serie se
   // creó, porque la pantalla no redirige a ningún lado.
   return resultado;
@@ -458,7 +459,7 @@ export async function repetirTurno(
 export async function eliminarTurno(id: string) {
   const supabase = await createClient();
   await supabase.from("turno").delete().eq("id", id);
-  revalidatePath("/turnos");
+  revalidarTurnos();
   // Se llama desde /turnos/[id]: sin redirect, el re-render busca un turno que
   // ya no existe y cae en notFound().
   redirect("/turnos");
@@ -532,6 +533,6 @@ export async function cancelarSerie(
     return { error: error.message };
   }
 
-  revalidatePath("/turnos");
+  revalidarTurnos();
   redirect("/turnos");
 }
