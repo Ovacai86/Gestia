@@ -317,8 +317,19 @@ export default async function TurnosPage({
                               href={`/turnos/${turno.id}`}
                               className="block rounded border border-gray-200 bg-white px-2 py-1 hover:border-gray-400"
                             >
-                              <div className="text-xs text-gray-500">
-                                {fechaHoraEnAR(turno.fecha_hora).hora}
+                              {/* El "$" del cobrado va en la misma fila que la
+                                  hora, pegado al borde derecho del bloque. */}
+                              <div className="flex items-baseline justify-between gap-1 text-xs text-gray-500">
+                                <span>{fechaHoraEnAR(turno.fecha_hora).hora}</span>
+                                {turno.pagado && (
+                                  <span
+                                    className="font-medium text-green-600"
+                                    title="Pagado"
+                                    aria-label="Pagado"
+                                  >
+                                    $
+                                  </span>
+                                )}
                               </div>
                               <div className="truncate text-sm font-medium text-gray-900">
                                 {turno.paciente?.nombre_apellido ?? "—"}
